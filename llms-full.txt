@@ -1,0 +1,769 @@
+# Resolved Markets — Full API Reference
+
+> Real-time prediction market orderbook data across crypto, sports, economics, and weather categories. High-frequency orderbook snapshots (~20Hz per token) and trades from Polymarket with ClickHouse-backed historical storage.
+
+## Authentication
+
+All authenticated endpoints require an API key passed via the `X-API-Key` header:
+
+```
+X-API-Key: rm_your_key
+```
+
+API keys are prefixed with `rm_`. Obtain one by signing up at resolvedmarkets.com.
+
+WebSocket connections authenticate via a message after connecting (not via query string).
+
+---
+
+## Public Endpoints
+
+### GET /health
+
+Health check endpoint.
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "uptime": 123456,
+  "timestamp": "2026-03-24T12:00:00.000Z"
+}
+```
+
+### GET /v1/public-stats
+
+Public statistics about the platform.
+
+**Response:**
+
+```json
+{
+  "snapshotCount": 15234567,
+  "activeMarkets": 42,
+  "cryptoPrices": {
+    "BTC": 95432.50,
+    "ETH": 3421.80,
+    "SOL": 187.25,
+    "XRP": 2.34
+  },
+  "timestamp": "2026-03-24T12:00:00.000Z"
+}
+```
+
+---
+
+## Market Endpoints (API Key Required)
+
+### GET /v1/categories
+
+List all available market categories.
+
+**Response:**
+
+```json
+{
+  "categories": ["crypto", "sports", "economics", "weather"]
+}
+```
+
+### GET /v1/markets/live
+
+List currently active markets.
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category` | string | No | Filter by category (crypto, sports, economics, weather) |
+
+**Response:**
+
+```json
+{
+  "markets": [
+    {
+      "conditionId": "0x1234...",
+      "slug": "will-btc-be-above-100000-on-march-25",
+      "question": "Will BTC be above $100,000 on March 25?",
+      "category": "crypto",
+      "tokens": [
+        {
+          "tokenId": "abc123",
+          "outcome": "Yes",
+          "side": "UP",
+          "price": 0.65
+        },
+        {
+          "tokenId": "def456",
+          "outcome": "No",
+          "side": "DOWN",
+          "price": 0.35
+        }
+      ],
+      "endDate": "2026-03-25T00:00:00.000Z",
+      "active": true
+    }
+  ]
+}
+```
+
+### GET /v1/markets/history/recent
+
+Recently resolved markets from the materialized view.
+
+**Response:**
+
+```json
+{
+  "markets": [
+    {
+      "conditionId": "0x1234...",
+      "slug": "will-btc-be-above-95000-on-march-23",
+      "question": "Will BTC be above $95,000 on March 23?",
+      "category": "crypto",
+      "resolvedAt": "2026-03-23T00:00:00.000Z",
+      "outcome": "Yes"
+    }
+  ]
+}
+```
+
+### GET /v1/markets/history
+
+Full historical markets with pagination.
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category` | string | No | Filter by category |
+| `limit` | number | No | Results per page (default: 50, max: 200) |
+| `offset` | number | No | Pagination offset |
+
+**Response:**
+
+```json
+{
+  "markets": [...],
+  "total": 1500,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### GET /v1/markets/by-slug/:slug
+
+Look up a market by its URL slug.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `slug` | string | Market URL slug |
+
+**Example:** `GET /v1/markets/by-slug/will-btc-be-above-100000-on-march-25`
+
+**Response:**
+
+```json
+{
+  "market": {
+    "conditionId": "0x1234...",
+    "slug": "will-btc-be-above-100000-on-march-25",
+    "question": "Will BTC be above $100,000 on March 25?",
+    "category": "crypto",
+    "tokens": [...],
+    "endDate": "2026-03-25T00:00:00.000Z",
+    "active": true
+  }
+}
+```
+
+### GET /v1/markets/by-slug/:slug/orderbook
+
+Live orderbook for a market looked up by slug.
+
+**Response:** Same structure as `GET /v1/markets/:id/orderbook`.
+
+### GET /v1/markets/:id/orderbook
+
+Live orderbook for a market by conditionId.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `id` | string | Market conditionId |
+
+**Response:**
+
+```json
+{
+  "market": {
+    "conditionId": "0x1234...",
+    "tokens": {
+      "UP": {
+        "tokenId": "abc123",
+        "bids": [
+          { "price": 0.65, "size": 1500.00 },
+          { "price": 0.64, "size": 2300.00 }
+        ],
+        "asks": [
+          { "price": 0.66, "size": 800.00 },
+          { "price": 0.67, "size": 1200.00 }
+        ],
+        "bestBid": 0.65,
+        "bestAsk": 0.66,
+        "midPrice": 0.655,
+        "spread": 0.01,
+        "totalBidDepth": 15000.00,
+        "totalAskDepth": 12000.00
+      },
+      "DOWN": {
+        "tokenId": "def456",
+        "bids": [...],
+        "asks": [...],
+        "bestBid": 0.34,
+        "bestAsk": 0.35,
+        "midPrice": 0.345,
+        "spread": 0.01,
+        "totalBidDepth": 14000.00,
+        "totalAskDepth": 11000.00
+      }
+    },
+    "timestamp": "2026-03-24T12:00:00.123Z"
+  }
+}
+```
+
+### GET /v1/markets/:id/snapshots
+
+Paginated historical orderbook snapshots.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `id` | string | Market conditionId |
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `limit` | number | No | Results per page (default: 100, max: 1000) |
+| `offset` | number | No | Pagination offset |
+| `from` | string | No | Start timestamp (ISO 8601) |
+| `to` | string | No | End timestamp (ISO 8601) |
+| `tokenSide` | string | No | Filter by token side: `UP` or `DOWN` |
+
+**Response:**
+
+```json
+{
+  "snapshots": [
+    {
+      "tokenId": "abc123",
+      "tokenSide": "UP",
+      "bids": [
+        { "price": 0.65, "size": 1500.00 }
+      ],
+      "asks": [
+        { "price": 0.66, "size": 800.00 }
+      ],
+      "bestBid": 0.65,
+      "bestAsk": 0.66,
+      "midPrice": 0.655,
+      "spread": 0.01,
+      "totalBidDepth": 15000.00,
+      "totalAskDepth": 12000.00,
+      "eventTimestamp": "2026-03-24T12:00:00.100Z",
+      "captureTimestamp": "2026-03-24T12:00:00.123Z",
+      "sequenceNumber": 42567
+    }
+  ],
+  "total": 50000,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+### GET /v1/markets/:id/summary
+
+Aggregated market statistics.
+
+**Path Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `id` | string | Market conditionId |
+
+**Response:**
+
+```json
+{
+  "summary": {
+    "conditionId": "0x1234...",
+    "avgSpread": 0.012,
+    "minSpread": 0.005,
+    "maxSpread": 0.025,
+    "avgMidPrice": 0.652,
+    "priceRange": { "low": 0.58, "high": 0.72 },
+    "avgBidDepth": 14500.00,
+    "avgAskDepth": 12300.00,
+    "snapshotCount": 85000,
+    "tradeCount": 3200,
+    "period": "24h"
+  }
+}
+```
+
+---
+
+## Snapshot Endpoints (API Key Required)
+
+### GET /api/snapshot
+
+Retrieve a historical snapshot at a specific timestamp.
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `timestamp` | string | Yes | ISO 8601 timestamp |
+| `marketId` | string | Yes | Market conditionId |
+
+**Example:** `GET /api/snapshot?timestamp=2026-03-24T12:00:00Z&marketId=0x1234`
+
+**Response:**
+
+```json
+{
+  "snapshot": {
+    "tokenId": "abc123",
+    "tokenSide": "UP",
+    "bids": [...],
+    "asks": [...],
+    "bestBid": 0.65,
+    "bestAsk": 0.66,
+    "midPrice": 0.655,
+    "spread": 0.01,
+    "eventTimestamp": "2026-03-24T12:00:00.100Z",
+    "captureTimestamp": "2026-03-24T12:00:00.123Z",
+    "sequenceNumber": 42567,
+    "cryptoPriceStalenessMs": 45
+  }
+}
+```
+
+### GET /api/snapshot/latest
+
+Retrieve the last 5 snapshots across all tokens.
+
+**Response:**
+
+```json
+{
+  "snapshots": [...]
+}
+```
+
+---
+
+## WebSocket API
+
+### Endpoint: /ws/orderbook
+
+Real-time orderbook stream via WebSocket.
+
+**Connection Flow:**
+
+1. Connect to `wss://api.resolvedmarkets.com/ws/orderbook`
+2. Send auth message within 5 seconds:
+
+```json
+{ "type": "auth", "apiKey": "rm_your_key" }
+```
+
+3. Receive auth confirmation:
+
+```json
+{ "type": "auth", "status": "ok" }
+```
+
+4. Subscribe to a crypto:
+
+```json
+{ "type": "subscribe", "crypto": "BTC" }
+```
+
+5. Receive real-time orderbook updates:
+
+```json
+{
+  "type": "snapshot",
+  "crypto": "BTC",
+  "tokenSide": "UP",
+  "tokenId": "abc123",
+  "bids": [...],
+  "asks": [...],
+  "bestBid": 0.65,
+  "bestAsk": 0.66,
+  "midPrice": 0.655,
+  "spread": 0.01,
+  "timestamp": "2026-03-24T12:00:00.123Z"
+}
+```
+
+**Auth timeout:** 5 seconds. Connection closed with code `4001` if not authenticated.
+
+**Subscription options for crypto:** `BTC`, `ETH`, `SOL`, `XRP`
+
+---
+
+## API Key Management (Clerk Auth Required)
+
+These endpoints require Clerk session authentication (not API key auth).
+
+### POST /v1/api-keys
+
+Generate a new API key.
+
+**Response:**
+
+```json
+{
+  "key": "rm_abc123...",
+  "id": "key_id_123",
+  "createdAt": "2026-03-24T12:00:00.000Z"
+}
+```
+
+### GET /v1/api-keys
+
+List all API keys for the authenticated user.
+
+**Response:**
+
+```json
+{
+  "keys": [
+    {
+      "id": "key_id_123",
+      "prefix": "rm_abc1...",
+      "createdAt": "2026-03-24T12:00:00.000Z",
+      "lastUsedAt": "2026-03-24T11:55:00.000Z",
+      "requestCount": 4521
+    }
+  ]
+}
+```
+
+### GET /v1/api-keys/validate
+
+Validate an API key (pass via `X-API-Key` header).
+
+**Response:**
+
+```json
+{
+  "valid": true,
+  "tier": "pro"
+}
+```
+
+### DELETE /v1/api-keys/:key
+
+Revoke an API key.
+
+**Response:**
+
+```json
+{
+  "success": true
+}
+```
+
+---
+
+## Payment Endpoints (Clerk Auth Required)
+
+### GET /user/tier
+
+Get current tier information for the authenticated user.
+
+**Response:**
+
+```json
+{
+  "tier": "pro",
+  "credits": 4500,
+  "rateLimit": 500,
+  "maxApiKeys": 5,
+  "maxWsConnections": 2,
+  "historyAccess": "30d"
+}
+```
+
+### GET /payments/packs
+
+List available credit packs.
+
+**Response:**
+
+```json
+{
+  "packs": [
+    {
+      "id": "pack_starter",
+      "name": "Starter Pack",
+      "credits": 1000,
+      "price": 9.99,
+      "currency": "USD"
+    }
+  ]
+}
+```
+
+### POST /payments/create-invoice
+
+Create a crypto payment invoice via NOWPayments.
+
+**Request Body:**
+
+```json
+{
+  "packId": "pack_starter"
+}
+```
+
+**Response:**
+
+```json
+{
+  "invoiceUrl": "https://nowpayments.io/payment/...",
+  "invoiceId": "inv_123",
+  "amount": 9.99,
+  "currency": "USD"
+}
+```
+
+---
+
+## Stats Endpoints (Clerk Auth + API Key Required)
+
+### GET /v1/stats
+
+Platform statistics (authenticated users only).
+
+**Response:**
+
+```json
+{
+  "totalSnapshots": 15234567,
+  "totalTrades": 892341,
+  "activeMarkets": 42,
+  "uptimeHours": 2160,
+  "avgSnapshotsPerSecond": 80
+}
+```
+
+---
+
+## Error Handling
+
+All errors follow a consistent format:
+
+```json
+{
+  "error": "Error message describing what went wrong",
+  "code": "ERROR_CODE"
+}
+```
+
+### HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 400 | Bad request — invalid parameters |
+| 401 | Unauthorized — missing or invalid API key |
+| 403 | Forbidden — insufficient tier access |
+| 404 | Not found — market or resource doesn't exist |
+| 429 | Rate limited — too many requests |
+| 500 | Internal server error |
+
+### Common Error Codes
+
+| Code | Description |
+|------|-------------|
+| `INVALID_API_KEY` | API key is missing, malformed, or revoked |
+| `RATE_LIMITED` | Request rate exceeded for your tier |
+| `TIER_RESTRICTED` | Feature not available on your tier |
+| `MARKET_NOT_FOUND` | No market with the given conditionId or slug |
+| `INVALID_TIMESTAMP` | Timestamp parameter is not valid ISO 8601 |
+| `INVALID_PARAMS` | One or more query parameters are invalid |
+
+### Rate Limits
+
+Rate limit headers are included in every response:
+
+```
+X-RateLimit-Limit: 500
+X-RateLimit-Remaining: 487
+X-RateLimit-Reset: 1711278060
+```
+
+---
+
+## Data Model Reference
+
+### Market
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `conditionId` | string | Unique market identifier (hex) |
+| `slug` | string | URL-friendly market identifier |
+| `question` | string | Human-readable market question |
+| `category` | string | One of: crypto, sports, economics, weather |
+| `tokens` | Token[] | UP and DOWN tokens with orderbooks |
+| `endDate` | string | Market resolution date (ISO 8601) |
+| `active` | boolean | Whether market is currently trading |
+
+### Token
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tokenId` | string | Unique token identifier |
+| `outcome` | string | "Yes" or "No" |
+| `side` | string | "UP" or "DOWN" |
+| `price` | number | Current token price (0-1) |
+
+### Orderbook Snapshot
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tokenId` | string | Token this snapshot belongs to |
+| `tokenSide` | string | "UP" or "DOWN" |
+| `bids` | Level[] | Bid levels sorted by price descending |
+| `asks` | Level[] | Ask levels sorted by price ascending |
+| `bestBid` | number | Highest bid price |
+| `bestAsk` | number | Lowest ask price |
+| `midPrice` | number | (bestBid + bestAsk) / 2 |
+| `spread` | number | bestAsk - bestBid |
+| `totalBidDepth` | number | Sum of all bid sizes |
+| `totalAskDepth` | number | Sum of all ask sizes |
+| `eventTimestamp` | string | When Polymarket emitted the event |
+| `captureTimestamp` | string | When our server processed it |
+| `sequenceNumber` | number | For gap detection in the stream |
+| `cryptoPriceStalenessMs` | number | Ms since last crypto price update |
+
+### Level
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | number | Price level (0-1) |
+| `size` | number | Size at this level |
+
+### Trade
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tokenId` | string | Token traded |
+| `price` | number | Trade price |
+| `size` | number | Trade size |
+| `side` | string | "buy" or "sell" |
+| `timestamp` | string | Trade timestamp (ISO 8601) |
+
+---
+
+## Market Categories
+
+### Crypto
+
+Prediction markets on whether BTC, ETH, SOL, or XRP will be above/below certain price levels at specific times. Markets span 4 timeframes: 5 minutes, 15 minutes, 1 hour, and 1 day.
+
+### Sports
+
+Prediction markets on game outcomes for NBA, NFL, and EPL (English Premier League) matches.
+
+### Economics
+
+Markets on macroeconomic events:
+- **FOMC** — Federal Reserve interest rate decisions
+- **NFP** — Non-Farm Payrolls reports
+
+### Weather
+
+Environmental prediction markets:
+- **Daily temperatures** — 30 major cities worldwide
+- **Hurricanes** — Storm path and intensity predictions
+- **Arctic** — Sea ice extent and temperature anomalies
+
+---
+
+## MCP Server
+
+The MCP (Model Context Protocol) server enables AI agents to query Resolved Markets data.
+
+### Installation
+
+The MCP server is included in the monorepo at `packages/mcp-server`.
+
+### Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `HF_API_URL` | `http://localhost:3001` | Backend API URL |
+| `HF_API_KEY` | — | API key for authentication |
+| `MCP_TRANSPORT` | `stdio` | Transport: `stdio` or `http` |
+| `MCP_PORT` | `3002` | Port for HTTP transport |
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_markets` | List active markets, optionally filtered by category |
+| `get_orderbook` | Get live orderbook for a market |
+| `get_snapshot` | Get historical snapshot at a timestamp |
+| `query_snapshots` | Query historical snapshots with filters |
+| `get_market_summary` | Get aggregated market statistics |
+| `get_system_stats` | Get platform health and stats |
+
+### Resources
+
+| URI | Description |
+|-----|-------------|
+| `markets://live` | All currently active markets |
+| `prices://latest` | Latest crypto prices |
+
+---
+
+## CLI
+
+Install the CLI globally:
+
+```bash
+npm install -g resolved-markets-cli
+```
+
+Set your API key:
+
+```bash
+export RESOLVED_MARKETS_API_KEY=rm_your_key
+```
+
+---
+
+## Tiers & Pricing
+
+| Feature | Free | Pro ($29/mo) | Enterprise ($99/mo) |
+|---------|------|-------------|---------------------|
+| Rate limit | 60/min | 500/min | 3000/min |
+| History access | 1 hour | 30 days | Full archive |
+| WebSocket | No | 2 connections | 10 connections |
+| MCP access | No | Read-only | Full |
+| Max API keys | 1 | 5 | 20 |
+
+Payments are processed via NOWPayments (cryptocurrency). Prepaid credit packs are also available.

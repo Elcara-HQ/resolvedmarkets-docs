@@ -1,0 +1,13 @@
+{
+  "projectTitle": "Resolved Markets",
+  "description": "Real-time prediction market orderbook data API for Polymarket. REST, WebSocket, and MCP server access to crypto, sports, economics, and weather market data.",
+  "folders": ["docs"],
+  "excludeFiles": ["LICENSE"],
+  "rules": [
+    "Always include the X-API-Key header for authenticated endpoints",
+    "WebSocket auth must happen within 5 seconds via message, not query string",
+    "API keys are prefixed with rm_",
+    "Each market has UP and DOWN tokens with separate orderbooks",
+    "Snapshots include both eventTimestamp and captureTimestamp for latency measurement"
+  ]
+}

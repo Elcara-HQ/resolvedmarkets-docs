@@ -1,0 +1,120 @@
+# Resolved Markets
+
+> Real-time prediction market orderbook data across crypto, sports, economics, and weather categories. Captures high-frequency orderbook snapshots (~20Hz per token) and trades from Polymarket, with historical storage in ClickHouse.
+
+## API
+
+Base URL: `https://api.resolvedmarkets.com`
+
+Auth: Pass your API key via the `X-API-Key` header on every request.
+
+```
+X-API-Key: rm_your_key
+```
+
+Get an API key by signing up at [resolvedmarkets.com](https://resolvedmarkets.com) and visiting the API Keys page.
+
+### Public Endpoints (no auth)
+
+- `GET /health` — Health check
+- `GET /v1/public-stats` — Snapshot count, active markets, latest crypto prices
+
+### Market Endpoints (API key required)
+
+- `GET /v1/categories` — List all market categories
+- `GET /v1/markets/live` — Currently active markets (query: `?category=crypto`)
+- `GET /v1/markets/history/recent` — Recently resolved markets from materialized view
+- `GET /v1/markets/history` — Full historical markets with pagination
+- `GET /v1/markets/by-slug/:slug` — Look up a market by its URL slug
+- `GET /v1/markets/by-slug/:slug/orderbook` — Live orderbook for a market by slug
+- `GET /v1/markets/:id/orderbook` — Live orderbook for a market by conditionId (returns UP + DOWN token books)
+- `GET /v1/markets/:id/snapshots` — Paginated historical orderbook snapshots
+- `GET /v1/markets/:id/summary` — Aggregated stats: spread, depth, price range
+
+### Snapshot Endpoints (API key required)
+
+- `GET /api/snapshot?timestamp=ISO8601&marketId=CONDITION_ID` — Historical snapshot at a specific timestamp
+- `GET /api/snapshot/latest` — Last 5 snapshots
+
+### WebSocket (API key required)
+
+Connect to `/ws/orderbook`, then authenticate via message:
+
+```json
+{ "type": "auth", "apiKey": "rm_your_key" }
+{ "type": "subscribe", "crypto": "BTC" }
+```
+
+### API Key Management (Clerk auth required)
+
+- `POST /v1/api-keys` — Generate a new API key
+- `GET /v1/api-keys` — List your API keys
+- `GET /v1/api-keys/validate` — Validate an API key
+- `DELETE /v1/api-keys/:key` — Revoke an API key
+
+### Payments (Clerk auth required)
+
+- `GET /user/tier` — Current tier info
+- `GET /payments/packs` — Available credit packs
+- `POST /payments/create-invoice` — Create crypto payment invoice
+
+## Data Model
+
+### Markets
+
+Each market has a `conditionId` (unique identifier), a `slug`, and two tokens: **UP** and **DOWN**. Each token has its own `tokenId` and orderbook.
+
+### Orderbook Snapshots
+
+Snapshots contain:
+- `bids` and `asks` arrays (price + size at each level)
+- `bestBid`, `bestAsk`, `midPrice`, `spread`
+- `totalBidDepth`, `totalAskDepth`
+- `eventTimestamp` (Polymarket emission time) and `captureTimestamp` (server processing time)
+- `sequenceNumber` for gap detection
+
+### Trades
+
+Individual trades with price, size, side, and timestamp.
+
+## Categories
+
+| Category | Examples |
+|----------|----------|
+| **Crypto** | BTC, ETH, SOL, XRP up/down prediction markets |
+| **Sports** | NBA, NFL, EPL match outcomes |
+| **Economics** | FOMC rate decisions, Non-Farm Payrolls |
+| **Weather** | Daily temperatures (30 cities), hurricanes, Arctic conditions |
+
+## MCP Server
+
+An MCP (Model Context Protocol) server is available for AI agent integration.
+
+**Tools:** `list_markets`, `get_orderbook`, `get_snapshot`, `query_snapshots`, `get_market_summary`, `get_system_stats`
+
+**Resources:** `markets://live`, `prices://latest`
+
+Configure with env vars `HF_API_URL` and `HF_API_KEY`.
+
+## CLI
+
+Install globally:
+
+```bash
+npm install -g resolved-markets-cli
+```
+
+## Tiers
+
+| Feature | Free | Pro ($29/mo) | Enterprise ($99/mo) |
+|---------|------|-------------|---------------------|
+| Rate limit | 60/min | 500/min | 3000/min |
+| History | 1 hour | 30 days | Full archive |
+| WebSocket | No | 2 connections | 10 connections |
+| MCP access | No | Read-only | Full |
+| API keys | 1 | 5 | 20 |
+
+## Links
+
+- Website: [resolvedmarkets.com](https://resolvedmarkets.com)
+- Full API reference: [llms-full.txt](https://resolvedmarkets.com/llms-full.txt)
