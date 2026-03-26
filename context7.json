@@ -1,4 +1,6 @@
 {
+"url": "https://context7.com/elcara-hq/resolvedmarkets-docs",
+  "public_key": "pk_nNsLY7N7ZnvCNRXj3L0nA",
   "projectTitle": "Resolved Markets",
   "description": "Real-time prediction market orderbook data API for Polymarket. REST, WebSocket, and MCP server access to crypto, sports, economics, and weather market data at ~20Hz.",
   "folders": ["docs"],
