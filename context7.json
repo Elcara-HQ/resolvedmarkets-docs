@@ -1,20 +1,4 @@
 {
-"url": "https://context7.com/elcara-hq/resolvedmarkets-docs",
-  "public_key": "pk_nNsLY7N7ZnvCNRXj3L0nA",
-  "projectTitle": "Resolved Markets",
-  "description": "Real-time prediction market orderbook data API for Polymarket. REST, WebSocket, and MCP server access to crypto, sports, economics, and weather market data at ~20Hz.",
-  "folders": ["docs"],
-  "excludeFiles": ["LICENSE"],
-  "rules": [
-    "Always include the X-API-Key header for authenticated endpoints",
-    "WebSocket auth must happen within 5 seconds via message, not query string",
-    "API keys are prefixed with rm_",
-    "Each market has UP and DOWN tokens with separate orderbooks",
-    "Snapshots include both eventTimestamp and captureTimestamp for latency measurement",
-    "UP + DOWN token prices don't always sum to 1.00 — the spread accounts for the difference",
-    "Sequence number gaps may be intentional (throttling at 50ms or dedup), not data loss",
-    "SOL slug prefix varies: sol- for short timeframes, solana- for hourly/daily",
-    "Rate limits are per tier: Free 60/min, Pro 500/min, Enterprise 3000/min",
-    "Historical data access is tier-gated: Free 1h, Pro 30d, Enterprise full archive"
-  ]
+  "url": "https://context7.com/elcara-hq/resolvedmarkets-docs",
+  "public_key": "pk_nNsLY7N7ZnvCNRXj3L0nA"
 }
