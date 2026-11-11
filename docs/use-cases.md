@@ -6,7 +6,7 @@ Real-world applications built on the Resolved Markets API. Each section includes
 
 ## Market Making Simulation
 
-Backtest market-making strategies by replaying historical orderbook snapshots. The API captures snapshots at ~20Hz per token, giving you the granularity needed to simulate realistic order placement, fill probability estimation, and inventory risk tracking without risking capital on a live market.
+Backtest market-making strategies by replaying historical orderbook snapshots. The API captures up to 10 snapshots a second for each orderbook (one every 100 ms) on crypto up/down markets. Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook. This gives you the granularity needed to simulate realistic order placement, fill probability estimation, and inventory risk tracking without risking capital on a live market.
 
 **Approach:** Fetch paginated historical snapshots for a given market and time range using `GET /v1/markets/:id/snapshots`. Iterate through them chronologically, simulating passive limit orders at each step. For each snapshot, check whether your resting orders would have been filled based on the best bid/ask crossing your price. Track PnL, inventory exposure, and fill rates over time.
 
@@ -110,7 +110,7 @@ import { useEffect, useRef, useState } from "react";
 const API_URL = "https://api.resolvedmarkets.com";
 const WS_URL = "wss://api.resolvedmarkets.com/ws/orderbook";
 const API_KEY = "rm_your_key";
-const CRYPTOS = ["BTC", "ETH", "SOL", "XRP"];
+const CRYPTOS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB"];
 
 function useOrderbookStream(apiKey) {
   const [books, setBooks] = useState({});
@@ -344,7 +344,7 @@ total ask depth. If the imbalance exceeds 60/40, explain what that might
 indicate about market sentiment."
 
 Prompt 3 - Cross-Market Momentum:
-"Get market summaries for all active BTC markets (5m, 15m, 1h, 1d).
+"Get market summaries for all active BTC up/down markets (5m, 15m, 1h, 4h, 1d).
 Compare the average mid prices across timeframes. Are shorter timeframes
 pricing higher or lower than longer ones? What does the term structure
 suggest about near-term directional bias?"
@@ -370,7 +370,7 @@ The MCP server handles authentication, rate limiting, and data formatting -- the
 
 ## Academic Research Data Export
 
-Bulk export historical orderbook data for academic research on prediction markets. Study spread dynamics, market microstructure, price discovery efficiency, and how prediction market prices converge to outcomes as expiration approaches. The ~20Hz snapshot frequency provides granularity comparable to traditional exchange datasets.
+Bulk export historical orderbook data for academic research on prediction markets. Study spread dynamics, market microstructure, price discovery efficiency, and how prediction market prices converge to outcomes as expiration approaches. Snapshots are event-driven. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook.
 
 **Approach:** Use the paginated `GET /v1/markets/:id/snapshots` endpoint to download all snapshots for a market over a given period. Load them into a pandas DataFrame for analysis. Export to Parquet or CSV for use in R, Stata, or other research tools.
 

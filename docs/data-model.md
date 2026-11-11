@@ -71,6 +71,21 @@ The delta between them measures full pipeline latency.
 ## Sequence Numbers
 
 Each token's orderbook maintains a monotonically increasing sequence number. Gaps may indicate:
-- **Throttled captures** — 50ms minimum interval per token (~20Hz max)
+- **Throttled captures** — a minimum interval for each orderbook, set by the market category: 100 ms on crypto up/down markets (up to 10 snapshots a second), up to 5 seconds in the slowest categories (see [Capture Rates](#capture-rates))
 - **Deduplicated captures** — identical orderbook state skipped
 - **Data loss** — check pipeline health metrics to distinguish
+
+## Capture Rates
+
+Snapshots are event-driven. The capture interval is the minimum time between two snapshots of one orderbook. A quiet orderbook gets fewer snapshots. The two tokens of a market (UP/DOWN or Yes/No) have separate orderbooks.
+
+| Capture interval | Max snapshots for each orderbook | Markets |
+|------------------|----------------------------------|---------|
+| 100 ms | 10 a second | Crypto up/down |
+| 500 ms | 2 a second | Crypto hit price, NBA, NFL, English Premier League, FIFA World Cup, ATP Tour, WTA Tour |
+| 1 s | 1 a second | Stocks, stock indices, commodities, forex, earnings |
+| 2 s | 1 every 2 seconds | Fed rates, Nonfarm Payroll, daily city temperature, private companies, company KPIs |
+| 3 s | 1 every 3 seconds | Elon Musk tweets |
+| 5 s | 1 every 5 seconds | Hurricanes, global temperature and climate, acquisitions, IPOs, prediction markets |
+
+`GET /v1/categories` returns the live `captureIntervalMs` of each category.

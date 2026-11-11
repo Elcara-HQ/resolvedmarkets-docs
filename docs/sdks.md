@@ -140,7 +140,7 @@ for (const market of markets) {
 ```typescript
 import WebSocket from "ws";
 
-type Crypto = "BTC" | "ETH" | "SOL" | "XRP";
+type Crypto = "BTC" | "ETH" | "SOL" | "XRP" | "DOGE" | "HYPE" | "BNB";
 
 interface SnapshotMessage {
   type: "snapshot";
@@ -684,7 +684,7 @@ export function useMarkets(apiKey: string) {
 ```tsx
 import { useEffect, useRef, useState, useCallback } from "react";
 
-type Crypto = "BTC" | "ETH" | "SOL" | "XRP";
+type Crypto = "BTC" | "ETH" | "SOL" | "XRP" | "DOGE" | "HYPE" | "BNB";
 
 interface OrderbookState {
   bids: { price: number; size: number }[];

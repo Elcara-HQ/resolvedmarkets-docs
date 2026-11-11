@@ -32,7 +32,7 @@ Platform statistics.
 {
   "snapshot_count": 50234567,
   "active_markets": 142,
-  "prices": { "BTC": 87420.50, "ETH": 3421.80, "SOL": 187.25, "XRP": 2.34 }
+  "prices": { "BTC": 87420.50, "ETH": 3421.80, "SOL": 187.25, "XRP": 2.34, "DOGE": 0.1842, "BNB": 652.30, "HYPE": 31.75 }
 }
 ```
 
@@ -96,7 +96,7 @@ Full historical markets with pagination.
 |-------|------|----------|-------------|
 | `category` | string | No | Filter by category |
 | `subcategory` | string | No | Filter by subcategory |
-| `crypto` | string | No | Legacy filter (BTC, ETH, SOL, XRP) |
+| `crypto` | string | No | Legacy filter (BTC, ETH, SOL, XRP, DOGE, HYPE, BNB) |
 | `timeframe` | string | No | Filter by timeframe |
 
 ### GET /v1/markets/by-slug/:slug
@@ -157,7 +157,7 @@ Live orderbook from Hyperliquid perpetual futures.
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `exchange` | string | Yes | `hyperliquid_perp` |
-| `symbol` | string | Yes | `BTC`, `ETH`, `SOL`, or `XRP` |
+| `symbol` | string | Yes | `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, or `BNB` |
 
 **Response:**
 ```json
@@ -183,7 +183,7 @@ Historical exchange orderbook snapshots (1/sec sampling, lightweight — no full
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `exchange` | string | Yes | `hyperliquid_perp` |
-| `symbol` | string | Yes | `BTC`, `ETH`, `SOL`, or `XRP` |
+| `symbol` | string | Yes | `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, or `BNB` |
 | `from` | string | No | Start timestamp (defaults to last 24h) |
 | `to` | string | No | End timestamp |
 | `limit` | number | No | Max rows (default 500, max 5000) |

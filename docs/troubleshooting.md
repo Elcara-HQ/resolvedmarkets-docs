@@ -41,7 +41,7 @@ Upgrade your tier at the [pricing page](https://resolvedmarkets.com/pricing) if 
 
 **Symptom:** Sequential snapshots for a token have non-consecutive `sequenceNumber` values.
 
-**Cause:** Gaps do not necessarily indicate data loss. The capture pipeline throttles snapshots to a 50ms minimum interval per token and deduplicates consecutive identical orderbook states using top-5 bid/ask level fingerprinting. Events that arrive within the throttle window or produce duplicate fingerprints are intentionally skipped.
+**Cause:** Gaps do not necessarily indicate data loss. The capture pipeline throttles snapshots to a minimum interval for each orderbook. The interval depends on the market category: 100 ms on crypto up/down markets, up to 5 seconds in the slowest categories. The pipeline also deduplicates consecutive identical orderbook states using top-5 bid/ask level fingerprinting. Events that arrive within the throttle window or produce duplicate fingerprints are intentionally skipped.
 
 **Fix:** Gaps from throttling and deduplication are normal and expected. Only investigate if you observe large, sustained jumps in sequence numbers, which could indicate a WebSocket disconnection on the backend side.
 
@@ -77,7 +77,7 @@ Upgrade your tier at the [pricing page](https://resolvedmarkets.com/pricing) if 
 ```json
 { "type": "subscribe", "crypto": "BTC" }
 ```
-Valid crypto values are `BTC`, `ETH`, `SOL`, and `XRP`.
+Valid crypto values are `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, and `BNB`.
 
 ---
 
@@ -105,9 +105,9 @@ Valid crypto values are `BTC`, `ETH`, `SOL`, and `XRP`.
 
 **Symptom:** `GET /v1/markets/by-slug/:slug` returns 404 for a Solana market you know exists.
 
-**Cause:** Solana markets use inconsistent slug prefixes depending on their timeframe. Short timeframes (5m, 15m) use the `sol-` prefix, while longer timeframes (1h, 1d) use the `solana-` prefix.
+**Cause:** Solana markets use inconsistent slug prefixes depending on their timeframe. The 5m, 15m, and 4h timeframes use the `sol-` prefix, while the 1h and 1d timeframes use the `solana-` prefix.
 
-**Fix:** Try both slug variants. For example, if `sol-usdt-1h` returns 404, try `solana-usdt-1h`, and vice versa. Other tokens (BTC, ETH, XRP) use consistent prefixes across all timeframes.
+**Fix:** Try both slug variants. For example, a 15m Solana slug starts with `sol-updown-15m-`, and a 1h Solana slug starts with `solana-up-or-down-`. BTC (`btc-`, `bitcoin-`), ETH (`eth-`, `ethereum-`), and DOGE (`doge-`, `dogecoin-`) change prefix in the same way. XRP, HYPE, and BNB use one prefix for all timeframes.
 
 ---
 
