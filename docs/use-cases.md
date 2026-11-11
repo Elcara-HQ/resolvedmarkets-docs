@@ -235,7 +235,7 @@ export default function LiquidityDashboard() {
 
 On Polymarket, every market has an UP token and a DOWN token whose prices should sum to approximately 1.00. When the sum deviates significantly (e.g., > 1.02 or < 0.98), there is a potential arbitrage opportunity: buy the underpriced side, or sell both when the sum exceeds 1.00. This use case monitors that spread.
 
-**Approach:** Poll `GET /v1/markets/live` to list the live markets. It returns an array of markets with no prices, so read the orderbook of each market with `GET /v1/markets/:id/orderbook`, compute `up.midPrice + down.midPrice` and flag deviations. Each orderbook request costs 1 credit and counts against your requests per minute, so filter the list (here by `category`) and poll no more often than your plan allows. The monitor waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on a network error or any other status. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
+**Approach:** Poll `GET /v1/markets/live` to list the live markets. It returns an array of markets with no prices, so read the orderbook of each market with `GET /v1/markets/:id/orderbook`, compute `up.midPrice + down.midPrice` and flag deviations. Each orderbook request costs 1 credit and counts against your requests per minute, so filter the list (here by `crypto` and `timeframe`) and poll no more often than your plan allows. On 2026-11-11 the BTC 5m list held 4 markets, so one scan cost 5 credits with the list request. One scan every 60 seconds then uses 7,200 credits a day. Free includes 5,000 credits a month and Pro 50,000. The monitor waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on a network error or any other status. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
 
 ```python
 import requests
@@ -268,11 +268,8 @@ def get_json(path: str, params: dict | None = None):
         return resp.json()
 
 
-def fetch_live_markets(category: str | None = None) -> list[dict]:
-    params = {}
-    if category:
-        params["category"] = category
-    return get_json("/v1/markets/live", params) or []
+def fetch_live_markets(crypto: str, timeframe: str) -> list[dict]:
+    return get_json("/v1/markets/live", {"crypto": crypto, "timeframe": timeframe}) or []
 
 
 def fetch_orderbook(condition_id: str) -> dict | None:
@@ -307,12 +304,12 @@ def check_arbitrage(markets: list[dict]) -> list[dict]:
     return sorted(opportunities, key=lambda x: x["deviation"], reverse=True)
 
 
-def monitor(interval_sec: int = 60, category: str = "crypto"):
+def monitor(interval_sec: int = 60, crypto: str = "BTC", timeframe: str = "5m"):
     """Continuously monitor for arbitrage opportunities."""
     print(f"Monitoring for UP+DOWN deviations > {DEVIATION_THRESHOLD}...")
 
     while True:
-        markets = fetch_live_markets(category)
+        markets = fetch_live_markets(crypto, timeframe)
         opps = check_arbitrage(markets)
 
         if opps:

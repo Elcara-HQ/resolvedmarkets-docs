@@ -1006,7 +1006,7 @@ if __name__ == "__main__":
 
 Scan all active markets, rank them by total liquidity (bid + ask depth), and flag markets where spread is unusually wide compared to their recent average.
 
-Each scan costs 1 credit for the list, 1 credit for each orderbook and 3 credits for each summary. To scan fewer markets, add `category`, `crypto` or `timeframe` to the list request. The scanner waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on any other error, for example a 410 when the market ended during the scan.
+Each scan costs 1 credit for the list, 1 credit for each orderbook and 3 credits for each summary: 1 + 4 × N credits for N listed markets. The scanner lists the markets of one coin (`crypto`, default `BTC`). On 2026-11-11 the BTC list held 24 markets, so one scan cost about 97 credits. The list of all crypto markets held 109 markets, about 437 credits for one scan. Free includes 5,000 credits a month and Pro 50,000. The scanner waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on any other error, for example a 410 when the market ended during the scan.
 
 ### TypeScript
 
@@ -1067,11 +1067,11 @@ async function getJson<T>(url: string, headers: Record<string, string>): Promise
   }
 }
 
-async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
+async function scanMarketLiquidity(apiKey: string, crypto: string = "BTC"): Promise<LiquidityReport[]> {
   const headers = { "X-API-Key": apiKey };
 
   // 1. Get all active markets
-  const marketsRes = await fetch(`${BASE_URL}/v1/markets/live`, { headers });
+  const marketsRes = await fetch(`${BASE_URL}/v1/markets/live?crypto=${crypto}`, { headers });
   if (!marketsRes.ok) throw new Error(`Failed to list markets: ${marketsRes.status}`);
   const markets = (await marketsRes.json()) as Market[];
 
@@ -1170,12 +1170,12 @@ def get_json(client: httpx.Client, path: str):
         return resp.json()
 
 
-def scan_market_liquidity(api_key: str) -> list[dict]:
+def scan_market_liquidity(api_key: str, crypto: str = "BTC") -> list[dict]:
     headers = {"X-API-Key": api_key}
     reports = []
 
     with httpx.Client(base_url=BASE_URL, headers=headers, timeout=30) as client:
-        markets_resp = client.get("/v1/markets/live")
+        markets_resp = client.get("/v1/markets/live", params={"crypto": crypto})
         markets_resp.raise_for_status()
         markets = markets_resp.json()
 
@@ -2084,7 +2084,7 @@ const tdStyle: React.CSSProperties = {
 
 Monitor all active prediction markets and detect when the sum of UP and DOWN token mid prices deviates from 1.00. This deviation signals a potential arbitrage opportunity. Verify that sufficient depth exists to execute the trade.
 
-Each scan costs 1 credit for the list and 1 credit for the orderbook of each listed market, and each request counts against your requests per minute. The monitor filters the list by `category` and scans every 60 seconds. It waits for `Retry-After` on a 429, stops on a 401 or 402, and skips a market on any other error. To check every 2 seconds, use the WebSocket stream of section 2.
+Each scan costs 1 credit for the list and 1 credit for the orderbook of each listed market: 1 + N credits for N markets. Each request also counts against your requests per minute. The monitor lists the markets of one coin and timeframe (default `BTC` and `5m`). On 2026-11-11 that list held 4 markets, so one scan cost 5 credits. A scan every 60 seconds then uses 7,200 credits a day. Free includes 5,000 credits a month and Pro 50,000. The monitor waits for `Retry-After` on a 429, stops on a 401 or 402, and skips a market on any other error. To check every 2 seconds, use the WebSocket stream of section 2.
 
 ### Python
 
@@ -2164,15 +2164,16 @@ def check_arbitrage(
     api_key: str,
     deviation_threshold: float = 0.02,
     min_executable_size: float = 100.0,
-    category: str = "crypto",
+    crypto: str = "BTC",
+    timeframe: str = "5m",
 ) -> list[ArbitrageSignal]:
-    """Scan all active markets for arbitrage opportunities."""
+    """Scan the live markets of one coin and timeframe for arbitrage opportunities."""
     headers = {"X-API-Key": api_key}
     signals: list[ArbitrageSignal] = []
 
     with httpx.Client(base_url=BASE_URL, headers=headers, timeout=30) as client:
         # Get all active markets
-        markets = get_json(client, "/v1/markets/live", {"category": category})
+        markets = get_json(client, "/v1/markets/live", {"crypto": crypto, "timeframe": timeframe})
         if markets is None:
             raise RuntimeError("Could not list the live markets")
 

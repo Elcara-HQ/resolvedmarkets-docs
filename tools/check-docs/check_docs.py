@@ -97,11 +97,13 @@ TRANSIENT_REASON = "Connection limit"
 STOP_WS = re.compile(r"\breturn\b|\braise\b|\bbreak\b|\balive\s*=\s*false\b|intentionalClose\s*=\s*true\b|_intentional_close\s*=\s*True\b")
 CMP_CODE = r"(?:===?|!==?)\s*{c}\b|\b{c}\s*(?:===?|!==?)|\bin\s*\([^)]*\b{c}\b"
 BOT_RETRY = {429, 500, 502, 503, 504}
+PER_SCAN = r"\bscan\b[^.]*\b\d[\d,]* credits\b"
+PER_DAY = r"\b\d[\d,]* credits a day\b"
 SCANNERS = [
-    ("SKILL.md", r"^## \d+\. Multi-Market Liquidity Scanner"),
-    ("SKILL.md", r"^## \d+\. Build a Price Alert System"),
-    ("SKILL.md", r"^## \d+\. Market Arbitrage Monitor"),
-    ("docs/use-cases.md", r"^## Cross-Token Arbitrage Detection"),
+    ("SKILL.md", r"^## \d+\. Multi-Market Liquidity Scanner", PER_SCAN),
+    ("SKILL.md", r"^## \d+\. Build a Price Alert System", PER_DAY),
+    ("SKILL.md", r"^## \d+\. Market Arbitrage Monitor", PER_DAY),
+    ("docs/use-cases.md", r"^## Cross-Token Arbitrage Detection", PER_DAY),
 ]
 SCAN_MIN_INTERVAL_S = 60
 
@@ -1057,31 +1059,65 @@ def check_alert_bot(docs, blocks):
     return bad, [f"spread alert bot blocks checked: {seen}"]
 
 
+def stop_survives(b, stop_body):
+    lines = b["code"].splitlines()
+    if b["lang"] in PY_LANGS:
+        if "raise" not in stop_body:
+            return True
+        for i, line in enumerate(lines):
+            if not re.match(r"^\s*except\s*(?:Exception\b|BaseException\b|:)", line):
+                continue
+            indent, ok = len(line) - len(line.lstrip()), False
+            for j in range(i - 1, -1, -1):
+                prev = lines[j]
+                depth = len(prev) - len(prev.lstrip())
+                if not prev.strip() or depth > indent:
+                    continue
+                if depth < indent or re.match(r"^\s*try\s*:", prev):
+                    break
+                if re.match(r"^\s*except\s+[\w.]*HTTP(?:Status)?Error\b", prev) and re.search(r"\breturn\b|\bbreak\b|\braise\b", branch_body(lines, j)):
+                    ok = True
+            if not ok:
+                return False
+        return True
+    if not re.search(r"\bthrow\b", stop_body):
+        return True
+    catches = [branch_body(lines, i) for i, x in enumerate(lines) if re.match(r"^\s*(?:\}\s*)?catch\b", x)]
+    return all(re.search(r"\bthrow\b", c) for c in catches)
+
+
 def check_scanners(docs, blocks):
     bad, seen = [], 0
-    for name, pattern in SCANNERS:
+    for name, pattern, cost in SCANNERS:
         start, end, lines = section_lines(docs.get(name, ""), pattern)
         if start is None:
             bad.append(f"{name}: no section {pattern!r}")
             continue
         intro = "\n".join(lines[start:end]).split("```")[0]
-        if "credit" not in intro:
-            bad.append(f"{name}:{start + 1}: the intro does not say what a scan or poll costs in credits")
+        if not re.search(cost, intro):
+            want = "credits for one scan" if cost == PER_SCAN else "credits a day"
+            bad.append(f"{name}:{start + 1}: the intro does not give the cost as a number of {want}")
         for b in blocks:
             if b["file"] != name or not (start < b["line"] <= end):
                 continue
-            if not re.search(r"\bfetch\(|\.get\(", b["code"]):
+            code = b["code"]
+            if not re.search(r"\bfetch\(|\.get\(", code):
                 continue
             seen += 1
             tag = f"{name}:{b['line']} ({b['lang']})"
-            branches = status_branches(b["code"])
+            branches = status_branches(code)
             if not any("429" in line and re.search(r"retry-after", body, re.I) and re.search(r"sleep|setTimeout|pausedUntil", body)
                        for line, body in branches):
                 bad.append(f"{tag}: does not wait the Retry-After seconds on HTTP 429")
-            if not any("401" in line and "402" in line and re.search(r"\braise|\bthrow\b|\.stop\(\)", body)
-                       for line, body in branches):
+            stops = [body for line, body in branches
+                     if "401" in line and "402" in line and re.search(r"\braise|\bthrow\b|\.stop\(\)", body)]
+            if not stops:
                 bad.append(f"{tag}: does not stop on HTTP 401 or 402 (a bad key or no credits)")
-            for m in re.finditer(r"\binterval_sec\w*\s*(?::\s*\w+\s*)?=\s*([\d.]+)", b["code"]):
+            elif not stop_survives(b, stops[0]):
+                bad.append(f"{tag}: a catch-all handler catches the 401/402 stop, so the loop goes on")
+            if "/v1/markets/live" in code and not re.search(r"/v1/markets/live\?crypto=|[\"']crypto[\"']\s*:", code):
+                bad.append(f"{tag}: lists every live market of the plan; filter the list by crypto")
+            for m in re.finditer(r"\binterval_sec\w*\s*(?::\s*\w+\s*)?=\s*([\d.]+)", code):
                 if float(m.group(1)) < SCAN_MIN_INTERVAL_S:
                     bad.append(f"{tag}: polls every {m.group(1)} s; each scan reads every listed market, "
                                f"so poll every {SCAN_MIN_INTERVAL_S} s or more")
@@ -1156,7 +1192,7 @@ def main():
          lambda: check_alert_bot(docs, blocks)),
         ("the CORS text matches the code; the snapshots tables list interval, touchsize and count",
          lambda: check_cors_params(docs, facts)),
-        ("scanners and pollers state their credit cost, wait Retry-After on 429, stop on 401 and 402, poll every 60 s or more",
+        ("scanners and pollers: cost in credits, Retry-After on 429, a stop on 401 and 402 that no catch-all hides, a coin filter, 60 s or more",
          lambda: check_scanners(docs, blocks)),
     ]
     passed = 0
