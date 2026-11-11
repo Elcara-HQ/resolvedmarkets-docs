@@ -919,7 +919,7 @@ The MCP server gives Claude direct access to Resolved Markets data through natur
 ### Install
 
 ```bash
-npm install -g @resolvedmarkets/mcp-server
+npm install -g @elcara-hq/resolvedmarkets-mcp
 ```
 
 ### claude_desktop_config.json
@@ -931,7 +931,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
@@ -943,13 +943,23 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ### Available Tools
 
+The hosted endpoint has all 14 tools and 3 resources. The npm package can be behind it: version 1.1.0 has 12 tools (no `get_market_metadata`, no `get_trades`) and no `reference://catalog`.
+
 | Tool | Description |
 |------|-------------|
+| `list_categories` | List all tracked categories with market counts |
 | `list_markets` | List active markets, optionally filtered by category |
+| `list_historical_markets` | List closed markets |
+| `get_market` | Resolve a market by slug |
+| `get_market_metadata` | Get market metadata and settled results |
 | `get_orderbook` | Get live orderbook for a market |
-| `get_snapshot` | Get historical snapshot at a specific timestamp |
-| `query_snapshots` | Query historical snapshots with filters |
 | `get_market_summary` | Get aggregated market statistics |
+| `get_snapshot` | Get historical snapshot at a timestamp |
+| `get_latest_snapshots` | Get the 5 most recent snapshots |
+| `query_snapshots` | Query historical snapshots with filters |
+| `get_trades` | Get the executed trade tape of a market |
+| `get_exchange_orderbook` | Get live Hyperliquid perp orderbook (Scale and above) |
+| `get_exchange_snapshots` | Get historical Hyperliquid perp snapshots (Scale and above) |
 | `get_system_stats` | Get platform health and stats |
 
 ### Available Resources
@@ -958,6 +968,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 |-----|-------------|
 | `markets://live` | All currently active markets |
 | `prices://latest` | Latest crypto prices |
+| `reference://catalog` | Static reference: categories, tiers, credit costs, error codes |
 
 ### Example Prompts
 
@@ -983,7 +994,7 @@ Add to `.cursor/mcp.json` in your project root (or global config at `~/.cursor/m
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
@@ -1002,7 +1013,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"

@@ -28,9 +28,10 @@ Wait for `{ "type": "auth", "status": "ok" }` before subscribing.
 
 | Tier       | Rate Limit |
 |------------|------------|
-| Free       | 60/min     |
-| Pro        | 500/min    |
-| Enterprise | 3000/min   |
+| Free       | 300/min    |
+| Pro        | 300/min    |
+| Scale      | 1,000/min  |
+| Enterprise | 3,000/min  |
 
 Upgrade your tier at the [pricing page](https://resolvedmarkets.com/pricing) if you need higher throughput.
 
@@ -94,17 +95,9 @@ Valid crypto values are `BTC`, `ETH`, `SOL`, and `XRP`.
 
 **Symptom:** `GET /v1/markets/:id/snapshots` returns an empty array even though the market has been active.
 
-**Cause:** Your tier restricts how far back you can query historical data.
+**Cause:** The time range of your query holds no snapshots for that market. History is unlimited on every tier, so the tier is not the cause.
 
-**Fix:** Check your tier's history window:
-
-| Tier       | History Access |
-|------------|----------------|
-| Free       | 1 hour         |
-| Pro        | 30 days        |
-| Enterprise | Full archive   |
-
-Adjust your query's time range to fall within your tier's window, or upgrade for deeper history.
+**Fix:** Set `from` and `to` so that the range covers the time when the market was active.
 
 ---
 

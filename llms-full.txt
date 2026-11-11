@@ -469,7 +469,8 @@ Validate an API key (pass via `X-API-Key` header).
 ```json
 {
   "valid": true,
-  "tier": "pro"
+  "label": "my key",
+  "created_at": "2026-03-24T12:00:00.000Z"
 }
 ```
 
@@ -487,9 +488,9 @@ Revoke an API key.
 
 ---
 
-## Payment Endpoints (Clerk Auth Required)
+## Payment Endpoints (Clerk Auth Required, except `/v1/payments/packs`)
 
-### GET /user/tier
+### GET /v1/user/tier
 
 Get current tier information for the authenticated user.
 
@@ -498,54 +499,54 @@ Get current tier information for the authenticated user.
 ```json
 {
   "tier": "pro",
-  "credits": 4500,
-  "rateLimit": 500,
-  "maxApiKeys": 5,
-  "maxWsConnections": 2,
-  "historyAccess": "30d"
+  "creditsRemaining": 48500,
+  "creditsTotal": 50000,
+  "rateLimitRpm": 300,
+  "wsConnectionsMax": 1,
+  "historyDepthHours": 0,
+  "mcpAccess": "full",
+  "expiresAt": "2026-04-27T00:00:00.000Z",
+  "limits": { "rpm": 300, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 }
 }
 ```
 
-### GET /payments/packs
+### GET /v1/payments/packs
 
-List available credit packs.
+List the subscription tiers and the credit packs. No auth.
 
 **Response:**
 
 ```json
 {
   "packs": [
-    {
-      "id": "pack_starter",
-      "name": "Starter Pack",
-      "credits": 1000,
-      "price": 9.99,
-      "currency": "USD"
-    }
-  ]
+    { "id": "pro_monthly", "tier": "pro", "priceUsd": 17, "credits": 50000 },
+    { "id": "scale_monthly", "tier": "scale", "priceUsd": 49, "credits": 500000 },
+    { "id": "enterprise_monthly", "tier": "enterprise", "priceUsd": 549, "credits": 5000000 },
+    { "id": "pro_annual", "tier": "pro", "priceUsd": 126, "credits": 50000 },
+    { "id": "scale_annual", "tier": "scale", "priceUsd": 360, "credits": 500000 },
+    { "id": "credits_10k", "tier": null, "priceUsd": 5, "credits": 10000 },
+    { "id": "credits_100k", "tier": null, "priceUsd": 20, "credits": 100000 },
+    { "id": "credits_500k", "tier": null, "priceUsd": 50, "credits": 500000 }
+  ],
+  "tiers": {
+    "free": { "rpm": 300, "wsMax": 0, "historyHours": 0, "mcp": "full", "maxKeys": 2 },
+    "pro": { "rpm": 300, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 },
+    "scale": { "rpm": 1000, "wsMax": 5, "historyHours": 0, "mcp": "full", "maxKeys": 10 },
+    "enterprise": { "rpm": 3000, "wsMax": 10, "historyHours": 0, "mcp": "full", "maxKeys": 20 }
+  }
 }
 ```
 
-### POST /payments/create-invoice
+### POST /v1/payments/create-invoice
 
-Create a crypto payment invoice via NOWPayments.
+Create a crypto payment invoice via NOWPayments. A credit pack (`tier: null`) needs a paid tier.
 
 **Request Body:**
 
 ```json
 {
-  "packId": "pack_starter"
-}
-```
-
-**Response:**
-
-```json
-{
-  "invoiceUrl": "https://nowpayments.io/payment/...",
-  "invoiceId": "inv_123",
-  "amount": 9.99,
-  "currency": "USD"
+  "pack": "pro_monthly",
+  "currency": "usdttrc20"
 }
 ```
 
@@ -589,6 +590,7 @@ All errors follow a consistent format:
 | 200 | Success |
 | 400 | Bad request — invalid parameters |
 | 401 | Unauthorized — missing or invalid API key |
+| 402 | Payment required — not enough credits |
 | 403 | Forbidden — insufficient tier access |
 | 404 | Not found — market or resource doesn't exist |
 | 429 | Rate limited — too many requests |
@@ -610,8 +612,8 @@ All errors follow a consistent format:
 Rate limit headers are included in every response:
 
 ```
-X-RateLimit-Limit: 500
-X-RateLimit-Remaining: 487
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 287
 X-RateLimit-Reset: 1711278060
 ```
 
@@ -709,7 +711,7 @@ The MCP (Model Context Protocol) server enables AI agents to query Resolved Mark
 
 ### Installation
 
-The MCP server is included in the monorepo at `packages/mcp-server`.
+Use the hosted endpoint `https://mcp.resolvedmarkets.com/mcp`, or run the npm package: `npx -y @elcara-hq/resolvedmarkets-mcp`. The hosted endpoint has all 14 tools and 3 resources. The npm package can be behind it: version 1.1.0 has 12 tools (no `get_market_metadata`, no `get_trades`) and no `reference://catalog`.
 
 ### Configuration
 
@@ -724,11 +726,19 @@ The MCP server is included in the monorepo at `packages/mcp-server`.
 
 | Tool | Description |
 |------|-------------|
+| `list_categories` | List all tracked categories with market counts |
 | `list_markets` | List active markets, optionally filtered by category |
+| `list_historical_markets` | List closed markets |
+| `get_market` | Resolve a market by slug |
+| `get_market_metadata` | Get market metadata and settled results |
 | `get_orderbook` | Get live orderbook for a market |
-| `get_snapshot` | Get historical snapshot at a timestamp |
-| `query_snapshots` | Query historical snapshots with filters |
 | `get_market_summary` | Get aggregated market statistics |
+| `get_snapshot` | Get historical snapshot at a timestamp |
+| `get_latest_snapshots` | Get the 5 most recent snapshots |
+| `query_snapshots` | Query historical snapshots with filters |
+| `get_trades` | Get the executed trade tape of a market |
+| `get_exchange_orderbook` | Get live Hyperliquid perp orderbook (Scale and above) |
+| `get_exchange_snapshots` | Get historical Hyperliquid perp snapshots (Scale and above) |
 | `get_system_stats` | Get platform health and stats |
 
 ### Resources
@@ -737,6 +747,7 @@ The MCP server is included in the monorepo at `packages/mcp-server`.
 |-----|-------------|
 | `markets://live` | All currently active markets |
 | `prices://latest` | Latest crypto prices |
+| `reference://catalog` | Static reference: categories, tiers, credit costs, error codes |
 
 ---
 
@@ -745,25 +756,32 @@ The MCP server is included in the monorepo at `packages/mcp-server`.
 Install the CLI globally:
 
 ```bash
-npm install -g resolved-markets-cli
+npm install -g @elcara-hq/resolvedmarkets-cli
 ```
 
 Set your API key:
 
 ```bash
-export RESOLVED_MARKETS_API_KEY=rm_your_key
+export RM_API_KEY=rm_your_key
 ```
 
 ---
 
 ## Tiers & Pricing
 
-| Feature | Free | Pro ($29/mo) | Enterprise ($99/mo) |
-|---------|------|-------------|---------------------|
-| Rate limit | 60/min | 500/min | 3000/min |
-| History access | 1 hour | 30 days | Full archive |
-| WebSocket | No | 2 connections | 10 connections |
-| MCP access | No | Read-only | Full |
-| Max API keys | 1 | 5 | 20 |
+| Feature | Free | Pro ($17/mo) | Scale ($49/mo) | Enterprise ($549/mo) |
+|---------|------|--------------|----------------|----------------------|
+| Monthly credits | 5,000 | 50,000 | 500,000 | 5,000,000 |
+| Rate limit | 300/min | 300/min | 1,000/min | 3,000/min |
+| Categories | Crypto | Crypto | All + Hyperliquid | All + Hyperliquid |
+| Orderbook depth | Full | Full | Full | Full |
+| History access | Unlimited | Unlimited | Unlimited | Unlimited |
+| WebSocket | No | 1 connection | 5 connections | 10 connections |
+| MCP access | Full | Full | Full | Full |
+| Max API keys | 2 | 5 | 10 | 20 |
 
-Payments are processed via NOWPayments (cryptocurrency). Prepaid credit packs are also available.
+Annual billing: Pro $126/yr, Scale $360/yr.
+
+Credit costs: 1 (simple queries), 3 (snapshot at a timestamp, market summary), 5 per page (snapshots, trades, wallet fills), 25 (backtest run or agent).
+
+Payments: card (Clerk Billing), cryptocurrency (NOWPayments), or x402 USDC micropayments ($0.001/request). Credit packs for paid tiers: $5 for 10,000 credits, $20 for 100,000, $50 for 500,000.

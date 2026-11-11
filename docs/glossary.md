@@ -24,14 +24,14 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **exchange snapshot** | Orderbook snapshot from an external exchange (e.g., Hyperliquid). Sampled at 1/sec intervals. Stored in `exchange_snapshots` table. |
 | **delta / price_change** | Incremental orderbook update from WebSocket. Applied on top of in-memory state. |
 | **book event** | Full orderbook snapshot from WebSocket. Replaces entire in-memory state for a token. |
-| **MCP** | Model Context Protocol. Connects AI agents (Claude, etc.) to Resolved Markets data via tools and resources. Free tier: read-only. Pro/Enterprise: full access. |
-| **tier** | Subscription level: Free, Pro ($17/mo), Enterprise ($249/mo). Determines rate limits, history depth, WebSocket connections, and features. |
-| **credit** | Unit of API consumption. Simple queries cost 1 credit, snapshots cost 5, time-series cost 10. Free users are exempt. |
-| **credit pack** | Prepaid bundle of API credits ($2/1K, $10/10K, $49/100K). |
-| **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and history restrictions. |
+| **MCP** | Model Context Protocol. Connects AI agents (Claude, etc.) to Resolved Markets data via tools and resources. Every tier has full access. |
+| **tier** | Subscription level: Free, Pro ($17/mo), Scale ($49/mo), Enterprise ($549/mo). Determines monthly credits, rate limits, WebSocket connections, and category access. History and orderbook depth are unlimited on every tier. |
+| **credit** | Unit of API consumption. Simple queries cost 1 credit, a snapshot at a timestamp or a market summary costs 3, a page of time-series costs 5. Every tier is metered: Free has 5,000 credits a month. |
+| **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
+| **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
 | **market category** | Classification of tracked markets: crypto, equities (SPX), social (Elon tweets), sports (NBA/NFL/EPL), economics (FOMC/NFP), weather (temperatures/hurricanes). |
 | **timeframe** | Duration window for a market. Crypto: 5m, 15m, 1h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |
 | **NOWPayments** | Crypto payment gateway for tier upgrades and credit packs. Supports 200+ cryptocurrencies. |
 | **Hyperliquid** | On-chain perpetual futures exchange. Resolved Markets collects L2 orderbook data for BTC, ETH, SOL, XRP perps. |
-| **rate limit** | Max requests per minute by tier (60/500/3000). Exceeding returns HTTP 429. x402 requests bypass tier limits. |
+| **rate limit** | Max requests per minute by tier (Free 300, Pro 300, Scale 1,000, Enterprise 3,000). Exceeding returns HTTP 429. x402 requests bypass tier limits. |

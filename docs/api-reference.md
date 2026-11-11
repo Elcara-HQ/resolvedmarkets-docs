@@ -132,12 +132,12 @@ Live orderbook for a market by conditionId. Returns both UP/DOWN (or Yes/No) tok
 
 ### GET /v1/markets/:id/snapshots
 
-Paginated historical orderbook snapshots. Subject to tier history depth limits.
+Paginated historical orderbook snapshots. Costs 5 credits per page.
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `side` | string | No | Filter: `UP` or `DOWN` |
-| `from` | string | No | Start timestamp (clamped by tier) |
+| `from` | string | No | Start timestamp |
 | `to` | string | No | End timestamp |
 | `limit` | number | No | Max rows (default 500, max 5000) |
 | `offset` | number | No | Pagination offset |
@@ -148,7 +148,7 @@ Aggregated market statistics: price ranges, spreads, depth averages, per-side br
 
 ---
 
-## Exchange Endpoints (API Key Required)
+## Exchange Endpoints (API Key Required; Scale or Enterprise)
 
 ### GET /v1/exchange/orderbook
 
@@ -194,7 +194,7 @@ Historical exchange orderbook snapshots (1/sec sampling, lightweight — no full
 
 ### GET /api/snapshot
 
-Historical snapshot at a specific timestamp. Subject to tier history depth limits.
+Historical snapshot at a specific timestamp. Costs 3 credits.
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -219,7 +219,7 @@ Last 5 snapshots across all tokens. Useful for checking data freshness.
 
 ### POST /v1/api-keys
 
-Generate a new API key. Limited by tier (Free: 1, Pro: 5, Enterprise: 20).
+Generate a new API key. Limited by tier (Free: 2, Pro: 5, Scale: 10, Enterprise: 20).
 
 ### GET /v1/api-keys
 
@@ -237,7 +237,7 @@ Revoke an API key by hash or raw key.
 
 ## Billing Endpoints
 
-### GET /v1/user/tier (Clerk Auth or API Key)
+### GET /v1/user/tier (Clerk Auth)
 
 Current tier, credits, and limits.
 
@@ -247,12 +247,12 @@ Current tier, credits, and limits.
   "tier": "pro",
   "creditsRemaining": 48500,
   "creditsTotal": 50000,
-  "rateLimitRpm": 500,
+  "rateLimitRpm": 300,
   "wsConnectionsMax": 1,
   "historyDepthHours": 0,
   "mcpAccess": "full",
   "expiresAt": "2026-04-27T00:00:00.000Z",
-  "limits": { "rpm": 500, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 }
+  "limits": { "rpm": 300, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 }
 }
 ```
 
@@ -268,13 +268,13 @@ Current Clerk Billing subscription status.
   "tier": "pro",
   "creditsRemaining": 48500,
   "expiresAt": "2026-04-27T00:00:00.000Z",
-  "limits": { "rpm": 500, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 }
+  "limits": { "rpm": 300, "wsMax": 1, "historyHours": 0, "mcp": "full", "maxKeys": 5 }
 }
 ```
 
 ### GET /v1/payments/packs
 
-Available tiers and credit packs with pricing.
+Available tiers and credit packs with pricing. No auth.
 
 ### POST /v1/payments/create-invoice (Clerk Auth)
 
@@ -288,7 +288,7 @@ Create crypto payment invoice via NOWPayments.
 
 Any protected endpoint accepts pay-per-request via the x402 protocol. Send a signed USDC payment ($0.001/request) in the `X-PAYMENT` header — no API key or account needed.
 
-x402 requests bypass rate limits, history depth restrictions, and credit deduction.
+x402 requests bypass rate limits and credit deduction.
 
 See [x402.org](https://x402.org) for client libraries and protocol details.
 
@@ -316,8 +316,8 @@ All errors follow:
 ### Response Headers
 
 ```
-X-RateLimit-Limit: 500
-X-RateLimit-Remaining: 487
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 287
 X-RateLimit-Reset: 1711278060
 X-Credits-Cost: 5
 X-Credits-Remaining: 48500

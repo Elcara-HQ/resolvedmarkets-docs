@@ -47,6 +47,17 @@ wss://api.resolvedmarkets.com/ws/orderbook
 }
 ```
 
+## Plan Limits
+
+| Tier | WebSocket connections |
+|------|-----------------------|
+| Free | 0 (no WebSocket access) |
+| Pro | 1 |
+| Scale | 5 |
+| Enterprise | 10 |
+
+The connection is closed with code `4003` on an invalid key, on the Free tier, or when the connection limit is in use.
+
 ## Auth Timeout
 
 If no auth message is received within 5 seconds, the connection is closed with code `4001`.
