@@ -432,7 +432,7 @@ Orderbook updates for one coin on each connection, sent every 2 seconds.
 
 `up` is the book of the first token (Up or Yes), `down` the book of the second (Down or No); a side is `null` when the server has no book for it yet. `timestamp` is the time of the last change of the book, in epoch milliseconds. `bidDepth` and `askDepth` are the sum of price × size of each side.
 
-A coin can have several markets of one timeframe at the same time: the live window and upcoming windows. The `orderbook` message does not say which window is live. The live window is the market with the earliest future `endDate` in the `markets` message, where `conditionId` is the `marketId`.
+A coin can have several up/down markets of one timeframe at the same time: the live window and upcoming windows. The `orderbook` message does not say which window is live. The live window is the up/down market of that timeframe with the earliest future `endDate` in the `markets` message, where `conditionId` is the `marketId`. Hit-price markets are strike levels of one day with the same `endDate`, so this rule does not apply to them.
 
 **One coin per connection:** a new `subscribe` message replaces the coin of the connection; it does not add a coin. The server has no `unsubscribe` message. To follow several coins, open one connection for each coin. Your plan's connection limit (Pro 1, Scale 5, Enterprise 10) is also the number of coins that you can follow at the same time.
 
