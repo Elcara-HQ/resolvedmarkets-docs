@@ -380,6 +380,9 @@ Paginated historical orderbook snapshots.
 | `offset` | number | No | Pagination offset |
 | `order` | string | No | `desc` (default, newest first) or `asc` |
 | `includebook` | string | No | `true` adds the `bids` and `asks` arrays to each row |
+| `touchsize` | string | No | `true` adds `best_bid_size` and `best_ask_size` (the size at the best bid and at the best ask) to each row. `includebook=true` adds them too |
+| `interval` | string | No | `1s`, `5s`, `15s`, `30s`, `1m`, `5m`, `15m`, `30m`, `1h`, `4h` or `1d`. Returns one candle row for each time bucket and side instead of the raw rows: `bucket`, `open`, `high`, `low` and `close` of the mid price, the averages of the spread, best prices and depths, and `snapshot_count`. Not with `includebook` or `touchsize` |
+| `count` | string | No | `false` skips the row count, so `total` can be `null` |
 
 **Response:**
 
@@ -620,6 +623,8 @@ A coin can have several up/down markets of one timeframe at the same time: the l
 **Update interval:** 2 seconds. Each message holds the books at the time of sending, not each change between two messages. For the full capture rate, read the stored snapshots with `GET /v1/markets/:id/snapshots`. The server sends the `markets` message again when the list of markets changes (checked every 10 seconds).
 
 **Auth timeout:** 5 seconds. Connection closed with code `4001` if not authenticated.
+
+**Close code 4003:** the server refuses the connection. The close reason is `Invalid API key`, `Tier restriction` (a plan without WebSocket access) or `Connection limit`. Stop on the first two. On `Connection limit`, connect again after 60 seconds: the server can count a dropped connection for up to 60 seconds.
 
 **Subscription options for crypto:** `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, `BNB`
 

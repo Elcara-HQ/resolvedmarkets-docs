@@ -132,7 +132,12 @@ Live orderbook for a market by conditionId. Returns both UP/DOWN (or Yes/No) tok
     "bids": [{"price": 0.52, "size": 1500}],
     "asks": [{"price": 0.53, "size": 800}]
   },
-  "down": { "..." : "..." }
+  "down": {
+    "bestBid": 0.47, "bestAsk": 0.48,
+    "midPrice": 0.475, "spread": 0.01,
+    "bids": [{"price": 0.47, "size": 900}],
+    "asks": [{"price": 0.48, "size": 1200}]
+  }
 }
 ```
 
@@ -143,10 +148,15 @@ Paginated historical orderbook snapshots. Costs 5 credits per page.
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `side` | string | No | Filter: `UP` or `DOWN` |
-| `from` | string | No | Start timestamp |
-| `to` | string | No | End timestamp |
-| `limit` | number | No | Max rows (default 500, max 5000) |
+| `from` | string | No | Start time in UTC: `YYYY-MM-DDTHH:MM:SSZ`, for example `2026-11-11T18:40:00Z` |
+| `to` | string | No | End time in UTC, in the same form as `from` |
+| `limit` | number | No | Rows per page (default 500, max 5000; max 2000 with `includebook=true`) |
 | `offset` | number | No | Pagination offset |
+| `order` | string | No | `desc` (default, newest first) or `asc` |
+| `includebook` | string | No | `true` adds the `bids` and `asks` arrays to each row |
+| `touchsize` | string | No | `true` adds `best_bid_size` and `best_ask_size` (the size at the best bid and at the best ask) to each row. `includebook=true` adds them too |
+| `interval` | string | No | `1s`, `5s`, `15s`, `30s`, `1m`, `5m`, `15m`, `30m`, `1h`, `4h` or `1d`. Returns one candle row for each time bucket and side instead of the raw rows: `bucket`, `open`, `high`, `low` and `close` of the mid price, the averages of the spread, best prices and depths, and `snapshot_count`. Not with `includebook` or `touchsize` |
+| `count` | string | No | `false` skips the row count, so `total` can be `null` |
 
 ### GET /v1/markets/:id/summary
 

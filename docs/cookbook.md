@@ -244,7 +244,13 @@ Send `from` and `to` as `YYYY-MM-DDTHH:MM:SSZ`, as above. A time with an offset 
 
 ## 5. Build a Spread Alert Bot
 
-Poll the orderbook every 10 seconds and print an alert when the spread exceeds a threshold.
+Poll the orderbook every 10 seconds and print an alert when the spread exceeds a threshold. Each poll costs 1 credit, so the bot uses 8,640 credits a day.
+
+The bot retries only the errors that can go away:
+
+- HTTP 429: wait the seconds of the `Retry-After` header, then try again.
+- HTTP 500, 502, 503 or 504, or a network error: try again at the next poll.
+- Any other status (such as 401, 402, 403, 404, or 410 `market_expired` after the market ends): print the error and stop.
 
 ### JavaScript
 
@@ -252,14 +258,35 @@ Poll the orderbook every 10 seconds and print an alert when the spread exceeds a
 const API_KEY = "rm_your_key";
 const MARKET_ID = "YOUR_MARKET_ID";
 const THRESHOLD = 0.05;
+const POLL_MS = 10_000;
 
 async function checkSpread() {
-  const res = await fetch(
-    `https://api.resolvedmarkets.com/v1/markets/${MARKET_ID}/orderbook`,
-    { headers: { "X-API-Key": API_KEY } }
-  );
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  const data = await res.json();
+  let res;
+  let body;
+  try {
+    res = await fetch(
+      `https://api.resolvedmarkets.com/v1/markets/${MARKET_ID}/orderbook`,
+      { headers: { "X-API-Key": API_KEY } }
+    );
+    body = await res.text();
+  } catch (err) {
+    console.error(`Network error: ${err.message}, retrying in ${POLL_MS / 1000}s`);
+    return POLL_MS;
+  }
+  if (res.status === 429) {
+    const wait = Number(res.headers.get("retry-after")) || 60;
+    console.error(`Rate limited, retrying in ${wait}s`);
+    return wait * 1000;
+  }
+  if ([500, 502, 503, 504].includes(res.status)) {
+    console.error(`API ${res.status}, retrying in ${POLL_MS / 1000}s`);
+    return POLL_MS;
+  }
+  if (!res.ok) {
+    console.error(`API ${res.status}: ${body}, stopping`);
+    return null;
+  }
+  const data = JSON.parse(body);
   for (const [side, book] of [["UP", data.up], ["DOWN", data.down]]) {
     if (!book) continue;
     if (book.spread > THRESHOLD) {
@@ -268,10 +295,18 @@ async function checkSpread() {
       console.log(`OK    [${side}] Spread ${book.spread.toFixed(4)}`);
     }
   }
+  return POLL_MS;
 }
 
-setInterval(checkSpread, 10_000);
-checkSpread();
+async function run() {
+  for (;;) {
+    const wait = await checkSpread();
+    if (wait === null) return;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+}
+
+run();
 ```
 
 ### Python
@@ -283,13 +318,31 @@ import requests
 API_KEY = "rm_your_key"
 MARKET_ID = "YOUR_MARKET_ID"
 THRESHOLD = 0.05
+POLL_SEC = 10
 
 while True:
-    res = requests.get(
-        f"https://api.resolvedmarkets.com/v1/markets/{MARKET_ID}/orderbook",
-        headers={"X-API-Key": API_KEY},
-    )
-    res.raise_for_status()
+    try:
+        res = requests.get(
+            f"https://api.resolvedmarkets.com/v1/markets/{MARKET_ID}/orderbook",
+            headers={"X-API-Key": API_KEY},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        print(f"Network error: {e}, retrying in {POLL_SEC}s")
+        time.sleep(POLL_SEC)
+        continue
+    if res.status_code == 429:
+        wait = int(res.headers.get("Retry-After", 60))
+        print(f"Rate limited, retrying in {wait}s")
+        time.sleep(wait)
+        continue
+    if res.status_code in (500, 502, 503, 504):
+        print(f"API {res.status_code}, retrying in {POLL_SEC}s")
+        time.sleep(POLL_SEC)
+        continue
+    if res.status_code != 200:
+        print(f"API {res.status_code}: {res.text}, stopping")
+        break
     data = res.json()
     for side in ("up", "down"):
         book = data[side]
@@ -297,7 +350,7 @@ while True:
             continue
         tag = "ALERT" if book["spread"] > THRESHOLD else "OK   "
         print(f"{tag} [{side.upper()}] Spread {book['spread']:.4f}")
-    time.sleep(10)
+    time.sleep(POLL_SEC)
 ```
 
 ### cURL
@@ -305,10 +358,24 @@ while True:
 ```bash
 THRESHOLD=0.05
 while true; do
-  curl -s -H "X-API-Key: rm_your_key" \
-    "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook" | \
-    jq -r --argjson t "$THRESHOLD" '{UP: .up, DOWN: .down} | to_entries[] | select(.value != null) | {side: .key, spread: .value.spread} | if .spread > $t then "ALERT \(.side) spread=\(.spread)" else "OK    \(.side) spread=\(.spread)" end'
-  sleep 10
+  status=$(curl -s -D headers.txt -o orderbook.json -w "%{http_code}" \
+    -H "X-API-Key: rm_your_key" \
+    "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook")
+  case "$status" in
+    200)
+      jq -r --argjson t "$THRESHOLD" '{UP: .up, DOWN: .down} | to_entries[] | select(.value != null) | {side: .key, spread: .value.spread} | if .spread > $t then "ALERT \(.side) spread=\(.spread)" else "OK    \(.side) spread=\(.spread)" end' orderbook.json
+      sleep 10 ;;
+    429)
+      retry=$(awk 'tolower($1) == "retry-after:" {print $2 + 0}' headers.txt)
+      echo "Rate limited, retrying in ${retry:-60}s"
+      sleep "${retry:-60}" ;;
+    000|500|502|503|504)
+      echo "API $status, retrying in 10s"
+      sleep 10 ;;
+    *)
+      echo "API $status: $(cat orderbook.json), stopping"
+      break ;;
+  esac
 done
 ```
 

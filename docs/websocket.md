@@ -107,7 +107,15 @@ The server sends the `markets` message again when the list of markets changes. I
 | Scale | 5 |
 | Enterprise | 10 |
 
-The connection is closed with code `4003` on an invalid key, on the Free tier, or when the connection limit is in use.
+The server closes the connection with code `4003` and one of these close reasons:
+
+| Close reason | Cause | What a client does |
+|--------------|-------|--------------------|
+| `Invalid API key` | The key is wrong or revoked. | Stop. |
+| `Tier restriction` | The plan has no WebSocket access (Free). | Stop. |
+| `Connection limit` | All connections of the plan are in use. | Connect again after 60 seconds. |
+
+The server can count a dropped connection for up to 60 seconds. A reconnect after a network error can get `Connection limit` in that time.
 
 ## Auth Timeout
 
