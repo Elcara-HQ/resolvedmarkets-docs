@@ -144,19 +144,23 @@ class ResolvedMarketsClient {
   }
 }
 
-const client = new ResolvedMarketsClient(process.env.RM_API_KEY!);
+async function main() {
+  const client = new ResolvedMarketsClient(process.env.RM_API_KEY!);
 
-const markets = await client.listMarkets({ crypto: "BTC", timeframe: "5m" });
-const live = markets.filter((m) => m.status === "live");
-for (const market of live) {
-  const book = await client.getOrderbook(market.conditionId);
-  console.log(`${market.slug}: spread=${book.up?.spread}`);
+  const markets = await client.listMarkets({ crypto: "BTC", timeframe: "5m" });
+  const live = markets.filter((m) => m.status === "live");
+  for (const market of live) {
+    const book = await client.getOrderbook(market.conditionId);
+    console.log(`${market.slug}: spread=${book.up?.spread}`);
+  }
+
+  if (live.length > 0) {
+    const page = await client.getSnapshots(live[0].conditionId, { limit: 100, side: "UP" });
+    console.log(`${page.total} snapshots; newest mid ${page.data[0]?.mid_price}`);
+  }
 }
 
-if (live.length > 0) {
-  const page = await client.getSnapshots(live[0].conditionId, { limit: 100, side: "UP" });
-  console.log(`${page.total} snapshots; newest mid ${page.data[0]?.mid_price}`);
-}
+main().catch(console.error);
 ```
 
 ### WebSocket Streaming with Reconnect
@@ -479,6 +483,17 @@ type OrderLevel struct {
 	Size  float64 `json:"size"`
 }
 
+type BookSide struct {
+	TokenID   string       `json:"tokenId"`
+	Bids      []OrderLevel `json:"bids"`
+	Asks      []OrderLevel `json:"asks"`
+	BestBid   float64      `json:"bestBid"`
+	BestAsk   float64      `json:"bestAsk"`
+	MidPrice  float64      `json:"midPrice"`
+	Spread    float64      `json:"spread"`
+	Timestamp int64        `json:"timestamp"`
+}
+
 type MarketOrderbook struct {
 	MarketID string    `json:"market_id"`
 	Question string    `json:"question"`
@@ -538,7 +553,7 @@ func (c *Client) GetMarketSummary(marketID string) (map[string]interface{}, erro
 
 ### WebSocket Streaming
 
-Each connection follows one coin. `StreamOrderbook` keeps one connection for one coin; run it once for each coin.
+Each connection follows one coin. `StreamOrderbook` keeps one connection for one coin; run it once for each coin. Save this code as a second file of the `resolvedmarkets` package: it uses `BookSide` and `OrderLevel` of the REST client.
 
 ```go
 package resolvedmarkets
@@ -552,17 +567,6 @@ import (
 
 	"github.com/gorilla/websocket"
 )
-
-type BookSide struct {
-	TokenID   string       `json:"tokenId"`
-	Bids      []OrderLevel `json:"bids"`
-	Asks      []OrderLevel `json:"asks"`
-	BestBid   float64      `json:"bestBid"`
-	BestAsk   float64      `json:"bestAsk"`
-	MidPrice  float64      `json:"midPrice"`
-	Spread    float64      `json:"spread"`
-	Timestamp int64        `json:"timestamp"`
-}
 
 type OrderbookMarket struct {
 	MarketID    string    `json:"marketId"`
@@ -603,7 +607,7 @@ func connectAndStream(url, apiKey, crypto string, onMarket func(OrderbookMarket)
 		return fmt.Errorf("auth send: %w", err)
 	}
 
-	var authResp map[string]string
+	var authResp map[string]interface{}
 	if err := conn.ReadJSON(&authResp); err != nil {
 		return fmt.Errorf("auth read: %w", err)
 	}

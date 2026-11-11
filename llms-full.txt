@@ -212,14 +212,14 @@ The keys are snake_case. `market_id` is the `conditionId`. `snapshot_count` can 
 
 ### GET /v1/markets/history
 
-All markets that have stored snapshots, in one response. The rows have the same keys as in `GET /v1/markets/history/recent`.
+All markets that have stored snapshots, in one response. Each row has `crypto`, `timeframe`, `market_id`, `first_seen`, `last_seen`, `snapshot_count`, `category`, `subcategory`, `is_live`, `end_date` and `question`. Unlike the rows of `GET /v1/markets/history/recent`, these rows have no `slug`, `event_title`, `neg_risk_id` or `replay_locked`.
 
 **Query Parameters:**
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `category`, `subcategory`, `crypto`, `timeframe` | string | No | Filters, as in `GET /v1/markets/live` |
-| `limit` | number | No | Maximum number of markets (default: no limit, max: 5000) |
+| `limit` | number | No | Maximum number of markets, 1 to 5000. Without `limit`: all matching markets, up to 200,000; more gives HTTP 422 `result_too_large` |
 | `since`, `before`, `order` | string | No | As in `GET /v1/markets/history/recent` |
 
 The route has no `offset` and no `status`. To read a long history, request one date range at a time with `since` and `before`.
@@ -374,8 +374,8 @@ Paginated historical orderbook snapshots.
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `side` | string | No | Filter by side: `UP` or `DOWN` |
-| `from` | string | No | Start timestamp (ISO 8601) |
-| `to` | string | No | End timestamp (ISO 8601) |
+| `from` | string | No | Start time in UTC: `YYYY-MM-DDTHH:MM:SSZ`, for example `2026-11-11T18:40:00Z` (JavaScript `toISOString()` also works). A time with an offset such as `+00:00` gets HTTP 500 |
+| `to` | string | No | End time in UTC, in the same form as `from` |
 | `limit` | number | No | Rows per page (default: 500, max: 5000; max 2000 with `includebook=true`) |
 | `offset` | number | No | Pagination offset |
 | `order` | string | No | `desc` (default, newest first) or `asc` |

@@ -28,6 +28,7 @@ const res = await fetch(
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
   { headers: { "X-API-Key": "rm_your_key" } }
 );
+if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
 const { up } = await res.json();
 if (up) {
   console.log(`Best Bid: ${up.bestBid}, Best Ask: ${up.bestAsk}, Spread: ${up.spread.toFixed(4)}`);
@@ -43,6 +44,7 @@ res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
     headers={"X-API-Key": "rm_your_key"},
 )
+res.raise_for_status()
 up = res.json()["up"]
 if up:
     print(f"Best Bid: {up['bestBid']}, Best Ask: {up['bestAsk']}, Spread: {up['spread']:.4f}")
@@ -68,6 +70,7 @@ const res = await fetch(
   "https://api.resolvedmarkets.com/v1/markets/live?category=crypto",
   { headers: { "X-API-Key": "rm_your_key" } }
 );
+if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
 const markets = await res.json();
 markets.forEach((m) => console.log(`${m.slug} — ${m.question}`));
 ```
@@ -81,6 +84,7 @@ res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/live?category=crypto",
     headers={"X-API-Key": "rm_your_key"},
 )
+res.raise_for_status()
 for m in res.json():
     print(f"{m['slug']} — {m['question']}")
 ```
@@ -194,6 +198,7 @@ const res = await fetch(
   `https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=${from}&to=${to}&limit=5000`,
   { headers: { "X-API-Key": "rm_your_key" } }
 );
+if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
 const { data } = await res.json();
 
 const header = "timestamp,token_side,best_bid,best_ask,mid_price,spread\n";
@@ -221,6 +226,7 @@ res = requests.get(
     headers={"X-API-Key": "rm_your_key"},
     params={"from": from_ts, "to": to_ts, "limit": 5000},
 )
+res.raise_for_status()
 rows = res.json()["data"]
 
 with open("snapshots_24h.csv", "w", newline="") as f:
@@ -252,6 +258,7 @@ async function checkSpread() {
     `https://api.resolvedmarkets.com/v1/markets/${MARKET_ID}/orderbook`,
     { headers: { "X-API-Key": API_KEY } }
   );
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   const data = await res.json();
   for (const [side, book] of [["UP", data.up], ["DOWN", data.down]]) {
     if (!book) continue;
@@ -282,6 +289,7 @@ while True:
         f"https://api.resolvedmarkets.com/v1/markets/{MARKET_ID}/orderbook",
         headers={"X-API-Key": API_KEY},
     )
+    res.raise_for_status()
     data = res.json()
     for side in ("up", "down"):
         book = data[side]
@@ -325,6 +333,7 @@ const res = await fetch(
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
   { headers: { "X-API-Key": "rm_your_key" } }
 );
+if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
 const data = await res.json();
 
 const totals = {};
@@ -350,6 +359,7 @@ res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
     headers={"X-API-Key": "rm_your_key"},
 )
+res.raise_for_status()
 data = res.json()
 
 totals = {}
@@ -386,6 +396,7 @@ const res = await fetch(
   `https://api.resolvedmarkets.com/v1/markets/by-slug/${slug}`,
   { headers: { "X-API-Key": "rm_your_key" } }
 );
+if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
 const market = await res.json();
 console.log(`${market.question} (ID: ${market.market_id})`);
 ```
@@ -400,6 +411,7 @@ res = requests.get(
     f"https://api.resolvedmarkets.com/v1/markets/by-slug/{slug}",
     headers={"X-API-Key": "rm_your_key"},
 )
+res.raise_for_status()
 market = res.json()
 print(f"{market['question']} (ID: {market['market_id']})")
 ```
@@ -432,6 +444,7 @@ for (const day of days) {
     `https://api.resolvedmarkets.com/v1/markets/history?crypto=BTC&since=${day}&before=${day}T23:59:59Z&limit=5000`,
     { headers: { "X-API-Key": API_KEY } }
   );
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   const { markets } = await res.json();
   for (const m of markets) allMarkets.set(m.market_id, m);
   console.log(`${day}: ${markets.length} markets`);
@@ -455,6 +468,7 @@ for day in days:
         headers={"X-API-Key": API_KEY},
         params={"crypto": "BTC", "since": day, "before": f"{day}T23:59:59Z", "limit": 5000},
     )
+    res.raise_for_status()
     markets = res.json()["markets"]
     for m in markets:
         all_markets[m["market_id"]] = m
@@ -478,6 +492,7 @@ const marketsRes = await fetch(
   "https://api.resolvedmarkets.com/v1/markets/live?category=crypto",
   { headers: { "X-API-Key": API_KEY } }
 );
+if (!marketsRes.ok) throw new Error(`API ${marketsRes.status}: ${await marketsRes.text()}`);
 const markets = await marketsRes.json();
 
 const results = [];
@@ -507,10 +522,12 @@ import requests
 
 API_KEY = "rm_your_key"
 
-markets = requests.get(
+res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/live?category=crypto",
     headers={"X-API-Key": API_KEY},
-).json()
+)
+res.raise_for_status()
+markets = res.json()
 
 results = []
 for market in markets:
@@ -548,7 +565,7 @@ done | sort -n | head -5
 
 ## 10. Export Snapshots for Backtesting
 
-Query the snapshots of one side of a market within a time range, oldest first, and page through all of them.
+Query the snapshots of one side of a market for the last 24 hours, oldest first, and page through all of them. For another range, set `FROM` and `TO` to times in the life of the market.
 
 ### JavaScript
 
@@ -558,8 +575,8 @@ import fs from "node:fs";
 const API_KEY = "rm_your_key";
 const MARKET_ID = "YOUR_MARKET_ID";
 const SIDE = "UP";
-const FROM = "2026-03-25T00:00:00Z";
-const TO = "2026-03-26T00:00:00Z";
+const FROM = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+const TO = new Date().toISOString();
 const LIMIT = 5000;
 
 let offset = 0;
@@ -575,6 +592,7 @@ while (true) {
   url.searchParams.set("offset", String(offset));
 
   const res = await fetch(url, { headers: { "X-API-Key": API_KEY } });
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
   const { data } = await res.json();
   allSnapshots.push(...data);
   console.log(`Fetched ${data.length} snapshots at offset ${offset}`);
@@ -594,12 +612,14 @@ console.log(`Exported ${allSnapshots.length} snapshots to backtest_data.csv`);
 ```python
 import csv
 import requests
+from datetime import datetime, timedelta, timezone
 
 API_KEY = "rm_your_key"
 MARKET_ID = "YOUR_MARKET_ID"
 SIDE = "UP"
-FROM = "2026-03-25T00:00:00Z"
-TO = "2026-03-26T00:00:00Z"
+now = datetime.now(timezone.utc)
+FROM = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+TO = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 LIMIT = 5000
 
 all_snapshots = []
@@ -618,6 +638,7 @@ while True:
             "offset": offset,
         },
     )
+    res.raise_for_status()
     batch = res.json()["data"]
     all_snapshots.extend(batch)
     print(f"Fetched {len(batch)} snapshots at offset {offset}")
@@ -637,8 +658,8 @@ print(f"Exported {len(all_snapshots)} snapshots to backtest_data.csv")
 ### cURL
 
 ```bash
-FROM="2026-03-25T00:00:00Z"
-TO="2026-03-26T00:00:00Z"
+FROM=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+TO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 curl -s -H "X-API-Key: rm_your_key" \
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&side=UP&order=asc&limit=5000" | \

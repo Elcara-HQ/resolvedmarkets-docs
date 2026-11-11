@@ -53,6 +53,8 @@ Each connection follows one coin. The server sends the books of that coin every 
 
 ### JavaScript
 
+Use Node.js 18 or later. Save the code as `live.mjs` and run `node live.mjs`: the top-level `await` needs the `.mjs` file type.
+
 ```javascript
 const API_KEY = "rm_your_key";
 
