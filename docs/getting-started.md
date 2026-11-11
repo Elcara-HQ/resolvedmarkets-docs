@@ -40,7 +40,7 @@ curl -H "X-API-Key: rm_your_key" \
 
 ### 4. Stream real-time data
 
-Connect via WebSocket and authenticate:
+Connect via WebSocket and authenticate (Pro and above; the Free tier has no WebSocket access):
 
 ```json
 { "type": "auth", "apiKey": "rm_your_key" }

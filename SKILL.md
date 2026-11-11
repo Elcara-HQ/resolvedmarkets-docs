@@ -1624,7 +1624,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
@@ -1643,7 +1643,7 @@ Add to `.cursor/mcp.json` in your project root:
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
@@ -1662,7 +1662,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
@@ -1681,7 +1681,7 @@ Add to `.claude/settings.json` or `~/.claude.json`:
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"

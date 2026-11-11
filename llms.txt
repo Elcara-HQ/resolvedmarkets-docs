@@ -29,7 +29,7 @@ X-API-Key: rm_your_key
 - `GET /v1/markets/:id/snapshots` — Paginated historical orderbook snapshots
 - `GET /v1/markets/:id/summary` — Aggregated stats: spread, depth, price range
 
-### Exchange Endpoints (API key required)
+### Exchange Endpoints (API key required; Scale and above)
 
 - `GET /v1/exchange/orderbook?exchange=hyperliquid_perp&symbol=BTC` — Live Hyperliquid perp orderbook
 - `GET /v1/exchange/snapshots?exchange=hyperliquid_perp&symbol=ETH` — Historical exchange snapshots (1/sec sampled)
@@ -39,7 +39,7 @@ X-API-Key: rm_your_key
 - `GET /api/snapshot?timestamp=ISO8601&marketId=CONDITION_ID` — Historical snapshot at timestamp
 - `GET /api/snapshot/latest` — Last 5 snapshots
 
-### WebSocket (API key required)
+### WebSocket (API key required; Pro and above)
 
 Connect to `/ws/orderbook`, then authenticate via message:
 
@@ -75,28 +75,32 @@ Connect to `/ws/orderbook`, then authenticate via message:
 
 ## Credit System
 
-Each API request costs credits: 1 (simple queries), 5 (snapshots), 10 (time-series). Free-tier users are exempt. x402 users pay per request instead of using credits.
+Each API request costs credits: 1 (simple queries), 3 (snapshot at a timestamp, market summary), 5 per page (snapshots, trades, wallet fills), 25 (backtest run or agent). Every tier is metered: Free has 5,000 credits a month, Pro 50,000, Scale 500,000, Enterprise 5,000,000. Credit packs for paid tiers: $5 for 10,000, $20 for 100,000, $50 for 500,000. x402 users pay per request instead of using credits.
 
 ## MCP Server
 
-**Tools:** `list_markets`, `get_orderbook`, `get_snapshot`, `query_snapshots`, `get_market_summary`, `get_system_stats`
+**Tools (14):** `list_categories`, `list_markets`, `list_historical_markets`, `get_market`, `get_market_metadata`, `get_orderbook`, `get_market_summary`, `get_snapshot`, `get_latest_snapshots`, `query_snapshots`, `get_trades`, `get_exchange_orderbook`, `get_exchange_snapshots`, `get_system_stats`
 
-**Resources:** `markets://live`, `prices://latest`
+**Resources:** `markets://live`, `prices://latest`, `reference://catalog`
 
-Free tier: read-only MCP access. Pro/Enterprise: full access.
+Every tier has full MCP access. Hosted endpoint: `https://mcp.resolvedmarkets.com/mcp`. npm package: `@elcara-hq/resolvedmarkets-mcp`.
 
 ## Tiers
 
-| Feature | Free | Pro ($17/mo) | Enterprise ($249/mo) |
-|---------|------|-------------|----------------------|
-| Crypto markets | BTC only | All (BTC/ETH/SOL/XRP) | Everything |
-| Hyperliquid | -- | Perp orderbooks | Perp orderbooks |
-| Sports / Social / Equities | -- | All included | All + odds |
-| Rate limit | 60/min | 500/min | 3000/min |
-| History | 24 hours | Unlimited | Unlimited |
-| WebSocket | -- | 1 connection | 10 connections |
-| MCP access | Read-only | Full | Full |
-| API keys | 1 | 5 | 20 |
+| Feature | Free | Pro ($17/mo) | Scale ($49/mo) | Enterprise ($549/mo) |
+|---------|------|--------------|----------------|----------------------|
+| Monthly credits | 5,000 | 50,000 | 500,000 | 5,000,000 |
+| Crypto markets | All coins | All coins | All coins | All coins |
+| Sports / Weather / Economics / Social / Equities | -- | -- | Included | Included |
+| Hyperliquid | -- | -- | Perp orderbooks | Perp orderbooks |
+| Rate limit | 300/min | 300/min | 1,000/min | 3,000/min |
+| Orderbook depth | Full | Full | Full | Full |
+| History | Unlimited | Unlimited | Unlimited | Unlimited |
+| WebSocket | -- | 1 connection | 5 connections | 10 connections |
+| MCP access | Full | Full | Full | Full |
+| API keys | 2 | 5 | 10 | 20 |
+
+Annual billing: Pro $126/yr, Scale $360/yr.
 
 Payment methods: Card (Clerk/Stripe), Crypto (NOWPayments), x402 USDC micropayments.
 

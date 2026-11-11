@@ -169,7 +169,7 @@ FROM=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '24 hours ag
 TO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 curl -s -H "X-API-Key: rm_your_key" \
-  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&limit=10000" | \
+  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&limit=5000" | \
   jq -r '["timestamp","bestBid","bestAsk","midPrice","spread"], (.[] | [.captureTimestamp,.bestBid,.bestAsk,.midPrice,.spread]) | @csv' \
   > snapshots_24h.csv
 ```
@@ -183,7 +183,7 @@ const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const to = new Date().toISOString();
 
 const res = await fetch(
-  `https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=${from}&to=${to}&limit=10000`,
+  `https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=${from}&to=${to}&limit=5000`,
   { headers: { "X-API-Key": "rm_your_key" } }
 );
 const snapshots = await res.json();
@@ -211,7 +211,7 @@ to_ts = now.isoformat()
 res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots",
     headers={"X-API-Key": "rm_your_key"},
-    params={"from": from_ts, "to": to_ts, "limit": 10000},
+    params={"from": from_ts, "to": to_ts, "limit": 5000},
 )
 snapshots = res.json()
 
@@ -554,7 +554,7 @@ const MARKET_ID = "YOUR_MARKET_ID";
 const TOKEN_SIDE = "UP";
 const FROM = "2026-03-25T00:00:00Z";
 const TO = "2026-03-26T00:00:00Z";
-const LIMIT = 10000;
+const LIMIT = 5000;
 
 let offset = 0;
 let allSnapshots = [];
@@ -597,7 +597,7 @@ MARKET_ID = "YOUR_MARKET_ID"
 TOKEN_SIDE = "UP"
 FROM = "2026-03-25T00:00:00Z"
 TO = "2026-03-26T00:00:00Z"
-LIMIT = 10000
+LIMIT = 5000
 
 all_snapshots = []
 offset = 0
@@ -637,7 +637,7 @@ FROM="2026-03-25T00:00:00Z"
 TO="2026-03-26T00:00:00Z"
 
 curl -s -H "X-API-Key: rm_your_key" \
-  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&tokenSide=UP&limit=10000" | \
+  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&tokenSide=UP&limit=5000" | \
   jq -r '["captureTimestamp","bestBid","bestAsk","midPrice","spread","totalBidDepth","totalAskDepth"], (.[] | [.captureTimestamp,.bestBid,.bestAsk,.midPrice,.spread,.totalBidDepth,.totalAskDepth]) | @csv' \
   > backtest_data.csv
 ```

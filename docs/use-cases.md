@@ -309,7 +309,7 @@ if __name__ == "__main__":
 
 ## AI Agent Trading Signals
 
-Use the MCP (Model Context Protocol) server to let Claude or other AI agents analyze live orderbook data and generate trading signals. The MCP server exposes 6 tools that agents can call directly -- no REST client code needed. The agent can reason about spread dynamics, depth imbalances, and cross-market correlations using natural language.
+Use the MCP (Model Context Protocol) server to let Claude or other AI agents analyze live orderbook data and generate trading signals. The MCP server exposes 14 tools that agents can call directly -- no REST client code needed. The agent can reason about spread dynamics, depth imbalances, and cross-market correlations using natural language.
 
 **Approach:** Configure the MCP server in Claude Desktop or Claude Code, then use conversational prompts to query live market data. The agent calls `list_markets`, `get_orderbook`, and `get_market_summary` tools under the hood and synthesizes the results into actionable analysis.
 
@@ -320,7 +320,7 @@ Use the MCP (Model Context Protocol) server to let Claude or other AI agents ana
   "mcpServers": {
     "resolved-markets": {
       "command": "npx",
-      "args": ["-y", "@resolvedmarkets/mcp-server"],
+      "args": ["-y", "@elcara-hq/resolvedmarkets-mcp"],
       "env": {
         "HF_API_URL": "https://api.resolvedmarkets.com",
         "HF_API_KEY": "rm_your_key"
