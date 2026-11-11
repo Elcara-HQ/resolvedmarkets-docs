@@ -1,6 +1,6 @@
 # Resolved Markets
 
-> Prediction market and exchange orderbook data API. Captures high-frequency snapshots from Polymarket (~20Hz) and Hyperliquid (1/sec) across crypto, equities, social, sports, economics, and weather categories.
+> Prediction market and exchange orderbook data API. Captures orderbook snapshots from Polymarket and Hyperliquid across crypto, equities, social, sports, economics, and weather categories. The Polymarket capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook. Hyperliquid orderbooks are sampled at 1/sec.
 
 ## API
 
@@ -65,13 +65,13 @@ Connect to `/ws/orderbook`, then authenticate via message:
 
 | Category | Examples |
 |----------|----------|
-| **Crypto** | BTC, ETH, SOL, XRP up/down prediction markets (5m, 15m, 1h, 1d) |
+| **Crypto** | BTC, ETH, SOL, XRP, DOGE, HYPE, BNB up/down prediction markets (5m, 15m, 1h, 4h, 1d) |
 | **Equities** | S&P 500 (SPX) daily open — Up or Down |
 | **Social** | Elon Musk weekly tweet count ranges (grouped, ~30 sub-markets) |
 | **Sports** | NBA, NFL, EPL match outcomes |
 | **Economics** | FOMC rate decisions, Non-Farm Payrolls |
 | **Weather** | Daily temperatures (30 cities), hurricanes, Arctic conditions |
-| **Exchange** | Hyperliquid perpetual orderbooks (BTC, ETH, SOL, XRP) |
+| **Exchange** | Hyperliquid perpetual orderbooks (BTC, ETH, SOL, XRP, DOGE, HYPE, BNB) |
 
 ## Credit System
 

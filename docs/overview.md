@@ -4,8 +4,8 @@ Resolved Markets captures high-fidelity orderbook data from Polymarket predictio
 
 ## What It Does
 
-- Captures Polymarket orderbook snapshots at ~20Hz per token via event-driven triggers
-- Collects Hyperliquid perpetual orderbook data (BTC/ETH/SOL/XRP) at 1/sec sampling
+- Captures Polymarket orderbook snapshots via event-driven triggers. The capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook
+- Collects Hyperliquid perpetual orderbook data (BTC/ETH/SOL/XRP/DOGE/HYPE/BNB) at 1/sec sampling
 - Records trades in real-time from Polymarket's CLOB (Central Limit Order Book)
 - Stores everything in ClickHouse for historical analysis
 - Serves data via REST API, WebSocket streams, and MCP server
@@ -37,13 +37,13 @@ OrderbookManager  <---------+                    v
 
 | Category | Tag | Examples |
 |----------|-----|----------|
-| **Crypto** | crypto-updown | BTC, ETH, SOL, XRP up/down prediction markets (5m, 15m, 1h, 1d) |
+| **Crypto** | crypto-updown | BTC, ETH, SOL, XRP, DOGE, HYPE, BNB up/down prediction markets (5m, 15m, 1h, 4h, 1d) |
 | **Equities** | spx-updown | S&P 500 (SPX) daily open — Up or Down |
 | **Social** | elon-tweets | Elon Musk weekly tweet count ranges (negRisk grouped, ~30 sub-markets) |
 | **Sports** | nba, nfl, epl | NBA, NFL, EPL match outcomes |
 | **Economics** | fed-decisions | FOMC rate decisions, Non-Farm Payrolls |
 | **Weather** | weather, daily-temperature | Daily temperatures (30 cities), hurricanes, Arctic conditions |
-| **Exchange** | -- | Hyperliquid perpetual orderbooks (BTC, ETH, SOL, XRP) |
+| **Exchange** | -- | Hyperliquid perpetual orderbooks (BTC, ETH, SOL, XRP, DOGE, HYPE, BNB) |
 
 ## Key Concepts
 

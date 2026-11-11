@@ -1,6 +1,6 @@
 # Resolved Markets — Full API Reference
 
-> Real-time prediction market orderbook data across crypto, sports, economics, and weather categories. High-frequency orderbook snapshots (~20Hz per token) and trades from Polymarket with ClickHouse-backed historical storage.
+> Real-time prediction market orderbook data across crypto, sports, economics, and weather categories. Event-driven orderbook snapshots and trades from Polymarket with ClickHouse-backed historical storage. The capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook.
 
 ## Authentication
 
@@ -46,7 +46,10 @@ Public statistics about the platform.
     "BTC": 95432.50,
     "ETH": 3421.80,
     "SOL": 187.25,
-    "XRP": 2.34
+    "XRP": 2.34,
+    "DOGE": 0.1842,
+    "BNB": 652.30,
+    "HYPE": 31.75
   },
   "timestamp": "2026-03-24T12:00:00.000Z"
 }
@@ -418,7 +421,7 @@ Real-time orderbook stream via WebSocket.
 
 **Auth timeout:** 5 seconds. Connection closed with code `4001` if not authenticated.
 
-**Subscription options for crypto:** `BTC`, `ETH`, `SOL`, `XRP`
+**Subscription options for crypto:** `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, `BNB`
 
 ---
 
@@ -684,7 +687,7 @@ X-RateLimit-Reset: 1711278060
 
 ### Crypto
 
-Prediction markets on whether BTC, ETH, SOL, or XRP will be above/below certain price levels at specific times. Markets span 4 timeframes: 5 minutes, 15 minutes, 1 hour, and 1 day.
+Prediction markets on whether BTC, ETH, SOL, XRP, DOGE, HYPE, or BNB will be above/below certain price levels at specific times. Up/down markets span 5 timeframes: 5 minutes, 15 minutes, 1 hour, 4 hours, and 1 day.
 
 ### Sports
 

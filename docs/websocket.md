@@ -70,6 +70,9 @@ If no auth message is received within 5 seconds, the connection is closed with c
 | `ETH` | Ethereum markets |
 | `SOL` | Solana markets |
 | `XRP` | Ripple markets |
+| `DOGE` | Dogecoin markets |
+| `HYPE` | Hyperliquid (HYPE) markets |
+| `BNB` | BNB markets |
 
 ## Code Examples
 

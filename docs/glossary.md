@@ -20,7 +20,7 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **token_side** | Enum: `UP` or `DOWN`. Indicates which side of a binary market a token represents. For Yes/No markets, Yes maps to UP, No maps to DOWN. |
 | **negRisk / grouped market** | A Polymarket event with multiple sub-markets (e.g., Elon tweet count ranges with ~30 binary sub-markets). Each sub-market has its own conditionId and is tracked independently. |
 | **CLOB** | Central Limit Order Book. Polymarket's matching engine. Resolved Markets connects via WebSocket to stream orderbook data. |
-| **orderbook snapshot** | Complete point-in-time capture of all bid/ask levels for a token, with derived metrics. Captured at up to ~20Hz per token. |
+| **orderbook snapshot** | Complete point-in-time capture of all bid/ask levels for a token, with derived metrics. The capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook. |
 | **exchange snapshot** | Orderbook snapshot from an external exchange (e.g., Hyperliquid). Sampled at 1/sec intervals. Stored in `exchange_snapshots` table. |
 | **delta / price_change** | Incremental orderbook update from WebSocket. Applied on top of in-memory state. |
 | **book event** | Full orderbook snapshot from WebSocket. Replaces entire in-memory state for a token. |
@@ -30,8 +30,8 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
 | **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
 | **market category** | Classification of tracked markets: crypto, equities (SPX), social (Elon tweets), sports (NBA/NFL/EPL), economics (FOMC/NFP), weather (temperatures/hurricanes). |
-| **timeframe** | Duration window for a market. Crypto: 5m, 15m, 1h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
+| **timeframe** | Duration window for a market. Crypto: 5m, 15m, 1h, 4h, 1d (up/down), hit-price (daily hit-price markets). SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |
 | **NOWPayments** | Crypto payment gateway for tier upgrades and credit packs. Supports 200+ cryptocurrencies. |
-| **Hyperliquid** | On-chain perpetual futures exchange. Resolved Markets collects L2 orderbook data for BTC, ETH, SOL, XRP perps. |
+| **Hyperliquid** | On-chain perpetual futures exchange. Resolved Markets collects L2 orderbook data for BTC, ETH, SOL, XRP, DOGE, HYPE, BNB perps. |
 | **rate limit** | Max requests per minute by tier (Free 300, Pro 300, Scale 1,000, Enterprise 3,000). Exceeding returns HTTP 429. x402 requests bypass tier limits. |
