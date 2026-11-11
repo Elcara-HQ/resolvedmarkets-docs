@@ -30,11 +30,14 @@ Platform statistics.
 **Response:**
 ```json
 {
-  "snapshot_count": 50234567,
+  "snapshot_count": "50234567",
   "active_markets": 142,
-  "prices": { "BTC": 87420.50, "ETH": 3421.80, "SOL": 187.25, "XRP": 2.34, "DOGE": 0.1842, "BNB": 652.30, "HYPE": 31.75 }
+  "prices": { "BTC": 87420.50, "ETH": 3421.80, "SOL": 187.25, "XRP": 2.34, "DOGE": 0.1842, "BNB": 652.30, "HYPE": 31.75 },
+  "exchange": { "snapshots_last_5min": 462, "latest_snapshot": "2026-03-24 12:00:00.123" }
 }
 ```
+
+`snapshot_count` is a string, because it is a 64-bit integer. `exchange` gives the number of exchange (Hyperliquid) orderbook snapshots in the last 5 minutes and the time of the newest one.
 
 ---
 
@@ -42,20 +45,23 @@ Platform statistics.
 
 ### GET /v1/categories
 
-List all market categories with active market counts.
+List the market configs, each with its category, active market count and capture interval.
 
-**Response:**
+**Response (shortened):**
 ```json
 [
-  { "id": "crypto-updown", "category": "crypto", "displayName": "Crypto Up/Down", "activeMarkets": 16 },
-  { "id": "spx-updown", "category": "equities", "displayName": "S&P 500 Up/Down", "activeMarkets": 1 },
-  { "id": "elon-tweets", "category": "social", "displayName": "Elon Musk Tweets", "activeMarkets": 30 },
-  { "id": "nba", "category": "sports", "displayName": "NBA", "activeMarkets": 30 },
-  { "id": "fed-decisions", "category": "economics", "displayName": "Fed/FOMC Decisions", "activeMarkets": 10 },
-  { "id": "weather", "category": "weather", "displayName": "Weather & Climate", "activeMarkets": 15 },
-  { "id": "daily-temperature", "category": "weather", "displayName": "Daily Temperature", "activeMarkets": 30 }
+  { "id": "crypto-updown", "category": "crypto", "displayName": "Crypto Up/Down", "activeMarkets": 63, "captureIntervalMs": 100, "refreshIntervalMs": 30000 },
+  { "id": "indices", "category": "equities", "displayName": "Stock Indices", "activeMarkets": 52, "captureIntervalMs": 1000, "refreshIntervalMs": 60000 },
+  { "id": "elon-tweets", "category": "social", "displayName": "Elon Musk Tweets", "activeMarkets": 129, "captureIntervalMs": 3000, "refreshIntervalMs": 300000 },
+  { "id": "nba", "category": "sports", "displayName": "NBA", "activeMarkets": 309, "captureIntervalMs": 500, "refreshIntervalMs": 60000 },
+  { "id": "tennis-atp", "category": "sports", "group": "Tennis", "displayName": "ATP Tour", "activeMarkets": 267, "captureIntervalMs": 500, "refreshIntervalMs": 60000 },
+  { "id": "fed-rates", "category": "economics", "displayName": "Fed Rates", "activeMarkets": 243, "captureIntervalMs": 2000, "refreshIntervalMs": 300000 },
+  { "id": "global-weather", "category": "weather", "displayName": "Global Temperature & Climate", "activeMarkets": 40, "captureIntervalMs": 5000, "refreshIntervalMs": 600000 },
+  { "id": "daily-temperature", "category": "weather", "displayName": "Daily City Temperature", "activeMarkets": 1815, "captureIntervalMs": 2000, "refreshIntervalMs": 300000 }
 ]
 ```
+
+The full response has one item for each enabled market config. `group` is only on configs that have one, such as the Tennis configs. `captureIntervalMs` is the minimum time between two snapshots of one orderbook.
 
 ### GET /v1/markets/live
 

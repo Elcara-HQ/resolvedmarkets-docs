@@ -71,7 +71,7 @@ Upgrade your tier at the [pricing page](https://resolvedmarkets.com/pricing) if 
 
 **Symptom:** You successfully connect and authenticate on the WebSocket, but no orderbook updates arrive.
 
-**Cause:** Authentication alone does not start the data stream. You must explicitly subscribe to one or more crypto symbols.
+**Cause:** Authentication alone does not start the data stream. You must subscribe to one crypto symbol. Each connection follows one symbol: a new `subscribe` replaces the last one. To follow several symbols, open one connection for each symbol.
 
 **Fix:** After receiving the auth confirmation, send a subscribe message:
 ```json

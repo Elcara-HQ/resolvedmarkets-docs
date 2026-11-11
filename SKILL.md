@@ -4,7 +4,7 @@ Practical, copy-paste code examples for the Resolved Markets prediction market o
 
 **Base URL:** `https://api.resolvedmarkets.com`
 **Auth:** `X-API-Key: rm_your_key` header on all authenticated endpoints
-**WebSocket:** `wss://api.resolvedmarkets.com/ws/orderbook` (message-based auth within 5s)
+**WebSocket:** `wss://api.resolvedmarkets.com/ws/orderbook` (message-based auth within 5s; one coin per connection; an `orderbook` message every 2 s)
 
 ---
 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
 
 ## 2. Resilient WebSocket Manager with Auto-Reconnect
 
-Production-grade WebSocket manager that handles authentication, multi-crypto subscriptions, exponential backoff reconnection, heartbeat detection, and event-driven state changes.
+Production-grade WebSocket manager that handles authentication, exponential backoff reconnection, heartbeat detection, and event-driven state changes. Each connection follows one coin (a new `subscribe` replaces the last one), so each manager holds one coin and the usage creates one manager for each coin. Each manager uses one connection of your plan's limit. The server sends an `orderbook` message with the books of every tracked market of the coin every 2 seconds.
 
 ### TypeScript
 
@@ -202,10 +202,7 @@ import { EventEmitter } from "events";
 
 type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated";
 
-interface OrderbookUpdate {
-  type: "snapshot";
-  crypto: string;
-  tokenSide: "UP" | "DOWN";
+interface BookSide {
   tokenId: string;
   bids: { price: number; size: number }[];
   asks: { price: number; size: number }[];
@@ -213,11 +210,21 @@ interface OrderbookUpdate {
   bestAsk: number;
   midPrice: number;
   spread: number;
-  timestamp: string;
+  timestamp: number;
+}
+
+interface OrderbookMarket {
+  marketId: string;
+  crypto: string;
+  timeframe: string;
+  question: string;
+  cryptoPrice: number;
+  up: BookSide | null;
+  down: BookSide | null;
 }
 
 interface OrderbookStreamEvents {
-  snapshot: (update: OrderbookUpdate) => void;
+  orderbook: (market: OrderbookMarket) => void;
   stateChange: (state: ConnectionState, previous: ConnectionState) => void;
   error: (error: Error) => void;
 }
@@ -226,8 +233,8 @@ class OrderbookStreamManager extends EventEmitter {
   private ws: WebSocket | null = null;
   private state: ConnectionState = "disconnected";
   private apiKey: string;
+  private crypto: string;
   private url: string;
-  private subscriptions: Set<string> = new Set();
   private reconnectAttempt: number = 0;
   private maxReconnectDelay: number = 30_000;
   private baseReconnectDelay: number = 1_000;
@@ -237,9 +244,10 @@ class OrderbookStreamManager extends EventEmitter {
   private authTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose: boolean = false;
 
-  constructor(apiKey: string, url: string = "wss://api.resolvedmarkets.com/ws/orderbook") {
+  constructor(apiKey: string, crypto: string, url: string = "wss://api.resolvedmarkets.com/ws/orderbook") {
     super();
     this.apiKey = apiKey;
+    this.crypto = crypto.toUpperCase();
     this.url = url;
   }
 
@@ -247,8 +255,8 @@ class OrderbookStreamManager extends EventEmitter {
     return this.state;
   }
 
-  getSubscriptions(): string[] {
-    return Array.from(this.subscriptions);
+  getCrypto(): string {
+    return this.crypto;
   }
 
   connect(): void {
@@ -261,22 +269,6 @@ class OrderbookStreamManager extends EventEmitter {
     this.intentionalClose = true;
     this.cleanup();
     this.setState("disconnected");
-  }
-
-  subscribe(crypto: string): void {
-    const upper = crypto.toUpperCase();
-    this.subscriptions.add(upper);
-    if (this.state === "authenticated" && this.ws) {
-      this.ws.send(JSON.stringify({ type: "subscribe", crypto: upper }));
-    }
-  }
-
-  unsubscribe(crypto: string): void {
-    const upper = crypto.toUpperCase();
-    this.subscriptions.delete(upper);
-    if (this.state === "authenticated" && this.ws) {
-      this.ws.send(JSON.stringify({ type: "unsubscribe", crypto: upper }));
-    }
   }
 
   private doConnect(): void {
@@ -322,7 +314,7 @@ class OrderbookStreamManager extends EventEmitter {
         }
         if (msg.status === "ok") {
           this.setState("authenticated");
-          this.resubscribeAll();
+          this.ws?.send(JSON.stringify({ type: "subscribe", crypto: this.crypto }));
         } else {
           this.emit("error", new Error(`Auth failed: ${JSON.stringify(msg)}`));
           this.intentionalClose = true;
@@ -332,8 +324,10 @@ class OrderbookStreamManager extends EventEmitter {
         return;
       }
 
-      if (msg.type === "snapshot") {
-        this.emit("snapshot", msg as unknown as OrderbookUpdate);
+      if (msg.type === "orderbook") {
+        for (const market of msg.markets as OrderbookMarket[]) {
+          this.emit("orderbook", market);
+        }
       }
     });
 
@@ -351,12 +345,6 @@ class OrderbookStreamManager extends EventEmitter {
       }
       this.handleDisconnect();
     });
-  }
-
-  private resubscribeAll(): void {
-    for (const crypto of this.subscriptions) {
-      this.ws?.send(JSON.stringify({ type: "subscribe", crypto }));
-    }
   }
 
   private resetHeartbeat(): void {
@@ -421,31 +409,31 @@ class OrderbookStreamManager extends EventEmitter {
 }
 
 // Usage
-const manager = new OrderbookStreamManager("rm_your_key");
+const managers = ["BTC", "ETH"].map((crypto) => {
+  const manager = new OrderbookStreamManager("rm_your_key", crypto);
 
-manager.on("stateChange", (state, prev) => {
-  console.log(`Connection: ${prev} -> ${state}`);
+  manager.on("stateChange", (state, prev) => {
+    console.log(`${crypto} connection: ${prev} -> ${state}`);
+  });
+
+  manager.on("orderbook", (market: OrderbookMarket) => {
+    if (!market.up) return;
+    console.log(
+      `${market.crypto} ${market.timeframe} UP: mid=${market.up.midPrice} spread=${market.up.spread}`
+    );
+  });
+
+  manager.on("error", (err) => {
+    console.error(`${crypto} stream error:`, err.message);
+  });
+
+  manager.connect();
+  return manager;
 });
-
-manager.on("snapshot", (update) => {
-  console.log(
-    `${update.crypto} ${update.tokenSide}: mid=${update.midPrice} spread=${update.spread}`
-  );
-});
-
-manager.on("error", (err) => {
-  console.error("Stream error:", err.message);
-});
-
-manager.subscribe("BTC");
-manager.subscribe("ETH");
-manager.subscribe("SOL");
-manager.subscribe("XRP");
-manager.connect();
 
 // Graceful shutdown
 process.on("SIGINT", () => {
-  manager.disconnect();
+  managers.forEach((manager) => manager.disconnect());
   process.exit(0);
 });
 ```
@@ -478,48 +466,33 @@ class OrderbookStreamManager:
     def __init__(
         self,
         api_key: str,
+        crypto: str,
         url: str = "wss://api.resolvedmarkets.com/ws/orderbook",
         base_delay: float = 1.0,
         max_delay: float = 30.0,
         heartbeat_timeout: float = 45.0,
     ):
         self.api_key = api_key
+        self.crypto = crypto.upper()
         self.url = url
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.heartbeat_timeout = heartbeat_timeout
 
         self._state = ConnectionState.DISCONNECTED
-        self._subscriptions: set[str] = set()
         self._reconnect_attempt = 0
         self._intentional_close = False
         self._ws: Optional[WebSocketClientProtocol] = None
         self._tasks: list[asyncio.Task] = []
 
         # Callbacks
-        self.on_snapshot: Optional[Callable[[dict], None]] = None
+        self.on_orderbook: Optional[Callable[[dict], None]] = None
         self.on_state_change: Optional[Callable[[ConnectionState, ConnectionState], None]] = None
         self.on_error: Optional[Callable[[Exception], None]] = None
 
     @property
     def state(self) -> ConnectionState:
         return self._state
-
-    def subscribe(self, crypto: str) -> None:
-        upper = crypto.upper()
-        self._subscriptions.add(upper)
-        if self._state == ConnectionState.AUTHENTICATED and self._ws:
-            asyncio.ensure_future(
-                self._ws.send(json.dumps({"type": "subscribe", "crypto": upper}))
-            )
-
-    def unsubscribe(self, crypto: str) -> None:
-        upper = crypto.upper()
-        self._subscriptions.discard(upper)
-        if self._state == ConnectionState.AUTHENTICATED and self._ws:
-            asyncio.ensure_future(
-                self._ws.send(json.dumps({"type": "unsubscribe", "crypto": upper}))
-            )
 
     async def connect(self) -> None:
         self._intentional_close = False
@@ -557,7 +530,7 @@ class OrderbookStreamManager:
     async def _do_connect(self) -> None:
         self._set_state(ConnectionState.CONNECTING)
 
-        async with websockets.connect(self.url) as ws:
+        async with websockets.connect(self.url, max_size=None) as ws:
             self._ws = ws
             self._set_state(ConnectionState.CONNECTED)
             self._reconnect_attempt = 0
@@ -579,9 +552,7 @@ class OrderbookStreamManager:
 
             self._set_state(ConnectionState.AUTHENTICATED)
 
-            # Re-subscribe
-            for crypto in self._subscriptions:
-                await ws.send(json.dumps({"type": "subscribe", "crypto": crypto}))
+            await ws.send(json.dumps({"type": "subscribe", "crypto": self.crypto}))
 
             # Read messages with heartbeat timeout
             while not self._intentional_close:
@@ -592,8 +563,9 @@ class OrderbookStreamManager:
                     return
 
                 msg = json.loads(raw)
-                if msg.get("type") == "snapshot" and self.on_snapshot:
-                    self.on_snapshot(msg)
+                if msg.get("type") == "orderbook" and self.on_orderbook:
+                    for market in msg["markets"]:
+                        self.on_orderbook(market)
 
     def _set_state(self, new_state: ConnectionState) -> None:
         prev = self._state
@@ -611,27 +583,26 @@ class OrderbookStreamManager:
 
 # Usage
 async def main():
-    manager = OrderbookStreamManager(api_key="rm_your_key")
-
-    def handle_snapshot(data: dict):
-        print(f"{data['crypto']} {data['tokenSide']}: mid={data['midPrice']} spread={data['spread']}")
+    def handle_market(market: dict):
+        up = market["up"]
+        if up:
+            print(f"{market['crypto']} {market['timeframe']} UP: mid={up['midPrice']} spread={up['spread']}")
 
     def handle_state(new: ConnectionState, prev: ConnectionState):
         print(f"Connection: {prev.value} -> {new.value}")
 
-    manager.on_snapshot = handle_snapshot
-    manager.on_state_change = handle_state
-    manager.on_error = lambda e: print(f"Error: {e}")
-
-    manager.subscribe("BTC")
-    manager.subscribe("ETH")
-    manager.subscribe("SOL")
-    manager.subscribe("XRP")
+    managers = []
+    for crypto in ["BTC", "ETH"]:
+        manager = OrderbookStreamManager(api_key="rm_your_key", crypto=crypto)
+        manager.on_orderbook = handle_market
+        manager.on_state_change = handle_state
+        manager.on_error = lambda e: print(f"Error: {e}")
+        managers.append(manager)
 
     try:
-        await manager.connect()
+        await asyncio.gather(*(manager.connect() for manager in managers))
     except KeyboardInterrupt:
-        await manager.disconnect()
+        await asyncio.gather(*(manager.disconnect() for manager in managers))
 
 
 if __name__ == "__main__":
@@ -1745,9 +1716,9 @@ Show me the platform stats including active market count and crypto prices.
 
 ---
 
-## 9. React Real-Time Dashboard Hook
+## 9. React Live Dashboard Hook
 
-Custom React hook `useOrderbookStream` for real-time WebSocket orderbook data in React/Next.js applications. Manages connection lifecycle, typed state, and cleanup on unmount.
+Custom React hook `useOrderbookStream` for WebSocket orderbook data in React/Next.js applications. Manages connection lifecycle, typed state, and cleanup on unmount. Each hook call opens one connection for one coin, and the server sends the books of that coin every 2 seconds.
 
 ### TypeScript (React)
 
@@ -1762,9 +1733,7 @@ interface Level {
   size: number;
 }
 
-interface OrderbookSnapshot {
-  crypto: string;
-  tokenSide: "UP" | "DOWN";
+interface BookSide {
   tokenId: string;
   bids: Level[];
   asks: Level[];
@@ -1772,12 +1741,22 @@ interface OrderbookSnapshot {
   bestAsk: number;
   midPrice: number;
   spread: number;
-  timestamp: string;
+  timestamp: number;
+}
+
+interface OrderbookMarket {
+  marketId: string;
+  crypto: string;
+  timeframe: string;
+  question: string;
+  cryptoPrice: number;
+  up: BookSide | null;
+  down: BookSide | null;
 }
 
 interface UseOrderbookStreamOptions {
   apiKey: string;
-  cryptos: string[];
+  crypto: string;
   url?: string;
   enabled?: boolean;
   reconnectDelay?: number;
@@ -1785,7 +1764,7 @@ interface UseOrderbookStreamOptions {
 }
 
 interface UseOrderbookStreamResult {
-  snapshots: Map<string, OrderbookSnapshot>;
+  markets: OrderbookMarket[];
   status: ConnectionStatus;
   error: string | null;
   lastUpdate: Date | null;
@@ -1795,14 +1774,14 @@ interface UseOrderbookStreamResult {
 export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrderbookStreamResult {
   const {
     apiKey,
-    cryptos,
+    crypto,
     url = "wss://api.resolvedmarkets.com/ws/orderbook",
     enabled = true,
     reconnectDelay = 1000,
     maxReconnectDelay = 30000,
   } = options;
 
-  const [snapshots, setSnapshots] = useState<Map<string, OrderbookSnapshot>>(new Map());
+  const [markets, setMarkets] = useState<OrderbookMarket[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -1812,8 +1791,6 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const mountedRef = useRef(true);
-  const cryptosRef = useRef(cryptos);
-  cryptosRef.current = cryptos;
 
   const cleanup = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -1862,10 +1839,7 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
         if (msg.status === "ok") {
           setStatus("authenticated");
           reconnectAttemptRef.current = 0;
-          // Subscribe to all cryptos
-          for (const crypto of cryptosRef.current) {
-            ws.send(JSON.stringify({ type: "subscribe", crypto: crypto.toUpperCase() }));
-          }
+          ws.send(JSON.stringify({ type: "subscribe", crypto: crypto.toUpperCase() }));
         } else {
           setStatus("error");
           setError("Authentication failed");
@@ -1873,14 +1847,8 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
         return;
       }
 
-      if (msg.type === "snapshot") {
-        const snapshot = msg as unknown as OrderbookSnapshot;
-        const key = `${snapshot.crypto}:${snapshot.tokenSide}`;
-        setSnapshots((prev) => {
-          const next = new Map(prev);
-          next.set(key, snapshot);
-          return next;
-        });
+      if (msg.type === "orderbook") {
+        setMarkets(msg.markets as OrderbookMarket[]);
         setLastUpdate(new Date());
       }
     };
@@ -1910,7 +1878,7 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
         reconnectTimerRef.current = setTimeout(connect, delay);
       }
     };
-  }, [apiKey, url, enabled, reconnectDelay, maxReconnectDelay, cleanup]);
+  }, [apiKey, crypto, url, enabled, reconnectDelay, maxReconnectDelay, cleanup]);
 
   // Connect/disconnect on enabled change
   useEffect(() => {
@@ -1924,20 +1892,13 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
     };
   }, [enabled, connect, cleanup]);
 
-  // Handle crypto subscription changes while connected
-  useEffect(() => {
-    const ws = wsRef.current;
-    if (!ws || status !== "authenticated") return;
-    for (const crypto of cryptos) {
-      ws.send(JSON.stringify({ type: "subscribe", crypto: crypto.toUpperCase() }));
-    }
-  }, [cryptos, status]);
-
-  return { snapshots, status, error, lastUpdate, reconnectCount };
+  return { markets, status, error, lastUpdate, reconnectCount };
 }
 ```
 
 ### React Component Example: Live Spread Ticker
+
+Each `SpreadTicker` opens one connection for one coin. Render one for each coin, up to your plan's connection limit: `<SpreadTicker apiKey={apiKey} crypto="BTC" />`.
 
 ```tsx
 // SpreadTicker.tsx
@@ -1946,19 +1907,18 @@ import { useOrderbookStream } from "./useOrderbookStream";
 
 interface SpreadTickerProps {
   apiKey: string;
+  crypto: string;
 }
 
-export function SpreadTicker({ apiKey }: SpreadTickerProps): React.ReactElement {
-  const { snapshots, status, error, lastUpdate, reconnectCount } = useOrderbookStream({
+export function SpreadTicker({ apiKey, crypto }: SpreadTickerProps): React.ReactElement {
+  const { markets, status, error, lastUpdate, reconnectCount } = useOrderbookStream({
     apiKey,
-    cryptos: ["BTC", "ETH", "SOL", "XRP"],
+    crypto,
   });
-
-  const cryptos = ["BTC", "ETH", "SOL", "XRP"] as const;
 
   return (
     <div style={{ fontFamily: "monospace", padding: 20 }}>
-      <h2>Live Spread Ticker</h2>
+      <h2>{crypto} Spread Ticker</h2>
 
       <div style={{ marginBottom: 12 }}>
         <span>Status: <strong>{status}</strong></span>
@@ -1970,7 +1930,7 @@ export function SpreadTicker({ apiKey }: SpreadTickerProps): React.ReactElement 
       <table style={{ borderCollapse: "collapse", width: "100%" }}>
         <thead>
           <tr>
-            <th style={thStyle}>Crypto</th>
+            <th style={thStyle}>Timeframe</th>
             <th style={thStyle}>Side</th>
             <th style={thStyle}>Best Bid</th>
             <th style={thStyle}>Best Ask</th>
@@ -1980,15 +1940,15 @@ export function SpreadTicker({ apiKey }: SpreadTickerProps): React.ReactElement 
           </tr>
         </thead>
         <tbody>
-          {cryptos.map((crypto) =>
-            (["UP", "DOWN"] as const).map((side) => {
-              const key = `${crypto}:${side}`;
-              const snap = snapshots.get(key);
+          {markets.map((market) =>
+            (["up", "down"] as const).map((side) => {
+              const key = `${market.marketId}:${side}`;
+              const snap = market[side];
               if (!snap) {
                 return (
                   <tr key={key}>
-                    <td style={tdStyle}>{crypto}</td>
-                    <td style={tdStyle}>{side}</td>
+                    <td style={tdStyle}>{market.timeframe}</td>
+                    <td style={tdStyle}>{side.toUpperCase()}</td>
                     <td style={tdStyle} colSpan={5}>Waiting for data...</td>
                   </tr>
                 );
@@ -1998,8 +1958,8 @@ export function SpreadTicker({ apiKey }: SpreadTickerProps): React.ReactElement 
                 : "N/A";
               return (
                 <tr key={key}>
-                  <td style={tdStyle}>{crypto}</td>
-                  <td style={tdStyle}>{side}</td>
+                  <td style={tdStyle}>{market.timeframe}</td>
+                  <td style={tdStyle}>{side.toUpperCase()}</td>
                   <td style={tdStyle}>{snap.bestBid.toFixed(4)}</td>
                   <td style={tdStyle}>{snap.bestAsk.toFixed(4)}</td>
                   <td style={tdStyle}>{snap.midPrice.toFixed(4)}</td>

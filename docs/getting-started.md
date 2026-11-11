@@ -38,7 +38,7 @@ curl -H "X-API-Key: rm_your_key" \
   https://api.resolvedmarkets.com/v1/markets/{conditionId}/orderbook
 ```
 
-### 4. Stream real-time data
+### 4. Stream live data
 
 Connect via WebSocket and authenticate (Pro and above; the Free tier has no WebSocket access):
 
@@ -46,6 +46,8 @@ Connect via WebSocket and authenticate (Pro and above; the Free tier has no WebS
 { "type": "auth", "apiKey": "rm_your_key" }
 { "type": "subscribe", "crypto": "BTC" }
 ```
+
+Each connection follows one coin. The server sends the books of that coin every 2 seconds. See [WebSocket API](websocket.md).
 
 ## Code Examples
 

@@ -7,7 +7,7 @@
 | `conditionId` | string | Unique market identifier (hex) |
 | `slug` | string | URL-friendly market identifier |
 | `question` | string | Human-readable market question |
-| `category` | string | One of: crypto, sports, economics, weather |
+| `category` | string | One of: crypto, equities, social, sports, economics, weather |
 | `tokens` | Token[] | UP and DOWN tokens with orderbooks |
 | `endDate` | string | Market resolution date (ISO 8601) |
 | `active` | boolean | Whether market is currently trading |
@@ -88,4 +88,4 @@ Snapshots are event-driven. The capture interval is the minimum time between two
 | 3 s | 1 every 3 seconds | Elon Musk tweets |
 | 5 s | 1 every 5 seconds | Hurricanes, global temperature and climate, acquisitions, IPOs, prediction markets |
 
-`GET /v1/categories` returns the live `captureIntervalMs` of each category.
+`GET /v1/categories` returns the `captureIntervalMs` of each market config.

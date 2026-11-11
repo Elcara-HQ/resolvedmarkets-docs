@@ -1,6 +1,6 @@
 # Resolved Markets Documentation
 
-Documentation for the [Resolved Markets](https://resolvedmarkets.com) API — real-time prediction market orderbook data from Polymarket.
+Documentation for the [Resolved Markets](https://resolvedmarkets.com) API — live and historical prediction market orderbook data from Polymarket.
 
 ## Contents
 
@@ -11,7 +11,7 @@ Documentation for the [Resolved Markets](https://resolvedmarkets.com) API — re
 
 ### Reference
 - [API Reference](docs/api-reference.md) — Complete REST API endpoint documentation
-- [WebSocket API](docs/websocket.md) — Real-time orderbook streaming
+- [WebSocket API](docs/websocket.md) — Orderbook updates every 2 seconds, one coin per connection
 - [Data Model](docs/data-model.md) — Markets, tokens, snapshots, trades
 - [Tiers & Pricing](docs/tiers.md) — Plans, rate limits, and features
 
