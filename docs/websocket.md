@@ -127,6 +127,8 @@ If no auth message is received within 5 seconds, the connection is closed with c
 
 The value is not case-sensitive. An `orderbook` message holds every tracked crypto market of the coin: its up/down markets and, where they exist, its hit-price markets.
 
+A coin can have several markets of one timeframe at the same time: the live window and upcoming windows. The `orderbook` message does not say which window is live. The `markets` message gives the `endDate` of each market, and its `conditionId` is the `marketId` of the `orderbook` message. The live window is the market with the earliest `endDate` in the future.
+
 ## Code Examples
 
 ### JavaScript

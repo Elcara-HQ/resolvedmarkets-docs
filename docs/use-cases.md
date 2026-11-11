@@ -104,7 +104,7 @@ A live dashboard that tracks bid/ask depth, spread trends, and liquidity imbalan
 
 **Approach:** Connect to the WebSocket endpoint at `wss://api.resolvedmarkets.com/ws/orderbook` with one connection for each crypto, because each connection follows one coin. On each `orderbook` message (every 2 seconds), update in-memory state and render depth bars, spread sparklines, and a bid/ask imbalance ratio. Use `GET /v1/markets/live` on page load to populate the market list.
 
-The example opens 7 connections, one for each coin. Only Enterprise (10 connections) allows 7; on Pro (1) or Scale (5), list fewer coins in `CRYPTOS`. It shows the 5m up/down market of each coin.
+The example opens 7 connections, one for each coin. Only Enterprise (10 connections) allows 7; on Pro (1) or Scale (5), list fewer coins in `CRYPTOS`. It shows the live 5m up/down market of each coin. A coin has several 5m markets at the same time: the live window and upcoming windows. The example reads the `endDate` of each market from the `markets` message and shows the 5m market with the earliest `endDate` in the future.
 
 ```jsx
 import { useEffect, useState } from "react";
@@ -133,6 +133,7 @@ function useOrderbookStream(apiKey) {
   useEffect(() => {
     const sockets = CRYPTOS.map((crypto) => {
       const ws = new WebSocket(WS_URL);
+      const endDates = new Map();
 
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "auth", apiKey }));
@@ -145,8 +146,15 @@ function useOrderbookStream(apiKey) {
           ws.send(JSON.stringify({ type: "subscribe", crypto }));
         }
 
+        if (msg.type === "markets") {
+          for (const m of msg.data) endDates.set(m.conditionId, new Date(m.endDate).getTime());
+        }
+
         if (msg.type === "orderbook") {
-          const market = msg.markets.find((m) => m.timeframe === TIMEFRAME);
+          const now = Date.now();
+          const market = msg.markets
+            .filter((m) => m.timeframe === TIMEFRAME && endDates.get(m.marketId) > now)
+            .sort((a, b) => endDates.get(a.marketId) - endDates.get(b.marketId))[0];
           if (!market || !market.up || !market.down) return;
           setBooks((prev) => ({
             ...prev,
