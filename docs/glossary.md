@@ -28,7 +28,7 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **tier** | Subscription level: Free, Pro ($17/mo), Scale ($49/mo), Enterprise ($549/mo). Determines monthly credits, rate limits, WebSocket connections, and category access. History and orderbook depth are unlimited on every tier. |
 | **credit** | Unit of API consumption. Simple queries cost 1 credit, a snapshot at a timestamp or a market summary costs 3, a page of time-series costs 5. Every tier is metered: Free has 5,000 credits a month. |
 | **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
-| **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and history restrictions. |
+| **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
 | **market category** | Classification of tracked markets: crypto, equities (SPX), social (Elon tweets), sports (NBA/NFL/EPL), economics (FOMC/NFP), weather (temperatures/hurricanes). |
 | **timeframe** | Duration window for a market. Crypto: 5m, 15m, 1h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |

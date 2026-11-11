@@ -943,6 +943,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ### Available Tools
 
+The hosted endpoint has all 14 tools and 3 resources. The npm package can be behind it: version 1.1.0 has 12 tools (no `get_market_metadata`, no `get_trades`) and no `reference://catalog`.
+
 | Tool | Description |
 |------|-------------|
 | `list_categories` | List all tracked categories with market counts |

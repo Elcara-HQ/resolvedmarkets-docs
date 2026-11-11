@@ -711,7 +711,7 @@ The MCP (Model Context Protocol) server enables AI agents to query Resolved Mark
 
 ### Installation
 
-Use the hosted endpoint `https://mcp.resolvedmarkets.com/mcp`, or run the npm package: `npx -y @elcara-hq/resolvedmarkets-mcp`.
+Use the hosted endpoint `https://mcp.resolvedmarkets.com/mcp`, or run the npm package: `npx -y @elcara-hq/resolvedmarkets-mcp`. The hosted endpoint has all 14 tools and 3 resources. The npm package can be behind it: version 1.1.0 has 12 tools (no `get_market_metadata`, no `get_trades`) and no `reference://catalog`.
 
 ### Configuration
 

@@ -288,7 +288,7 @@ Create crypto payment invoice via NOWPayments.
 
 Any protected endpoint accepts pay-per-request via the x402 protocol. Send a signed USDC payment ($0.001/request) in the `X-PAYMENT` header — no API key or account needed.
 
-x402 requests bypass rate limits, history depth restrictions, and credit deduction.
+x402 requests bypass rate limits and credit deduction.
 
 See [x402.org](https://x402.org) for client libraries and protocol details.
 
