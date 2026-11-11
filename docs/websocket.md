@@ -30,7 +30,7 @@ wss://api.resolvedmarkets.com/ws/orderbook
 { "type": "subscribe", "crypto": "BTC" }
 ```
 
-5. Receive one `orderbook` message at once, then one every 2 seconds. Each message holds the current books of every tracked market of the coin:
+5. Receive one `orderbook` message at once, then one every 2 seconds. Each message holds the current books of every tracked market of the coin (fields of `up` and `down` shortened here):
 
 ```json
 {
@@ -83,6 +83,8 @@ wss://api.resolvedmarkets.com/ws/orderbook
 | `bids`, `asks` | All price levels, best price first |
 | `bestBid`, `bestAsk`, `midPrice`, `spread` | Top of the book |
 | `bidDepth`, `askDepth` | Sum of price × size of each side |
+
+`up` and `down` also have other snapshot fields, such as `eventTimestamp` and `captureTimestamp`.
 
 ## One Coin per Connection
 

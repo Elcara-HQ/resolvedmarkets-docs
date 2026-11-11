@@ -411,7 +411,7 @@ Orderbook updates for one coin on each connection, sent every 2 seconds.
 { "type": "subscribe", "crypto": "BTC" }
 ```
 
-5. Receive one `orderbook` message at once, then one every 2 seconds. Each message holds the current books of every tracked market of the coin:
+5. Receive one `orderbook` message at once, then one every 2 seconds. Each message holds the current books of every tracked market of the coin (fields of `up` and `down` shortened here):
 
 ```json
 {
