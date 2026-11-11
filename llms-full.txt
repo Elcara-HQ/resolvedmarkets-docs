@@ -22,15 +22,23 @@ WebSocket connections authenticate via a message after connecting (not via query
 
 Health check endpoint.
 
-**Response:**
+**Response (shortened):**
 
 ```json
 {
-  "status": "ok",
-  "uptime": 123456,
-  "timestamp": "2026-03-24T12:00:00.000Z"
+  "status": "healthy",
+  "clickhouse": true,
+  "redis": true,
+  "pipeline_ready": true,
+  "uptime": 8996,
+  "ws_clob": true,
+  "capturing": true,
+  "crypto_price_age_ms": 11308,
+  "crypto_prices_fresh": true
 }
 ```
+
+`status` is `healthy`, `degraded` or `starting`.
 
 ### GET /v1/public-stats
 
@@ -83,86 +91,162 @@ The full response has one item for each enabled market config. `group` is only o
 
 ### GET /v1/markets/live
 
-List currently active markets.
+List the live markets that your plan can see.
 
 **Query Parameters:**
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `category` | string | No | Filter by category (crypto, equities, social, sports, economics, weather) |
+| `subcategory` | string | No | Filter by subcategory: the coin of a crypto market (`BTC`), else a group such as `NBA`, `FOMC` or a city |
+| `crypto` | string | No | Filter by coin (BTC, ETH, SOL, XRP, DOGE, HYPE, BNB) |
+| `timeframe` | string | No | Filter by timeframe (`5m`, `hit-price`, `daily-high` and others) |
+| `limit` | number | No | Maximum number of markets |
+| `offset` | number | No | Number of markets to skip |
 
-**Response:**
+With `limit` or `offset`, the list is sorted by end time, soonest first, and settled markets come last.
+
+**Response:** an array of markets, not an object.
 
 ```json
-{
-  "markets": [
-    {
-      "conditionId": "0x1234...",
-      "slug": "will-btc-be-above-100000-on-march-25",
-      "question": "Will BTC be above $100,000 on March 25?",
-      "category": "crypto",
-      "tokens": [
-        {
-          "tokenId": "abc123",
-          "outcome": "Yes",
-          "side": "UP",
-          "price": 0.65
-        },
-        {
-          "tokenId": "def456",
-          "outcome": "No",
-          "side": "DOWN",
-          "price": 0.35
-        }
-      ],
-      "endDate": "2026-03-25T00:00:00.000Z",
-      "active": true
-    }
-  ]
-}
+[
+  {
+    "category": "crypto",
+    "subcategory": "BTC",
+    "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+    "timeframe": "5m",
+    "conditionId": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+    "question": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+    "slug": "btc-updown-5m-1794423000",
+    "tokenIds": ["95010913097039662003166578407115840630830626265131174231608772954190451306599", "115630846830548204811025008874898652613314752354335076923695101212752692956310"],
+    "outcomes": ["Up", "Down"],
+    "endDate": "2026-11-11T18:55:00.000Z",
+    "active": true,
+    "configId": "crypto-updown",
+    "priceToBeat": null,
+    "twapLookbackSeconds": 60,
+    "crypto": "BTC",
+    "tokenIdUp": "95010913097039662003166578407115840630830626265131174231608772954190451306599",
+    "tokenIdDown": "115630846830548204811025008874898652613314752354335076923695101212752692956310",
+    "startDate": "2026-11-11T18:50:00.000Z",
+    "status": "live",
+    "expired": false,
+    "inPlay": false,
+    "expiresIn": 46283
+  }
+]
 ```
+
+`status` is `upcoming`, `live`, `settling` or `expired`. A coin can have the live window and up to 3 upcoming windows of one up/down timeframe at the same time; the live window has `status: "live"`. `tokenIds[0]` is the Up (or Yes) token. Grouped markets also have `negRiskMarketID` and `eventTitle`.
 
 ### GET /v1/markets/history/recent
 
-Recently resolved markets from the materialized view.
-
-**Response:**
-
-```json
-{
-  "markets": [
-    {
-      "conditionId": "0x1234...",
-      "slug": "will-btc-be-above-95000-on-march-23",
-      "question": "Will BTC be above $95,000 on March 23?",
-      "category": "crypto",
-      "resolvedAt": "2026-03-23T00:00:00.000Z",
-      "outcome": "Yes"
-    }
-  ]
-}
-```
-
-### GET /v1/markets/history
-
-Full historical markets with pagination.
+Markets that have stored snapshots, live and closed. The closed markets come first, sorted by `order`, then the live markets. With `status=all`, the live markets fill at most half of `limit`.
 
 **Query Parameters:**
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| `category` | string | No | Filter by category |
-| `limit` | number | No | Results per page (default: 50, max: 200) |
-| `offset` | number | No | Pagination offset |
+| `category`, `subcategory`, `crypto`, `timeframe` | string | No | Filters, as in `GET /v1/markets/live` |
+| `status` | string | No | `live`, `closed` or `all` (default) |
+| `limit` | number | No | Maximum number of markets (default: 100, max: 500) |
+| `since` | string | No | Keep the markets captured on or after this date (`YYYY-MM-DD` or ISO 8601) |
+| `before` | string | No | Keep the markets first captured on or before this date |
+| `order` | string | No | `newest` (default, by last capture) or `oldest` (by first capture) |
+
+The route has no `offset`. It rejects `from` and `to` with `400`.
 
 **Response:**
 
 ```json
 {
-  "markets": [...],
-  "total": 1500,
-  "limit": 50,
-  "offset": 0
+  "total_markets": 81910,
+  "total_snapshots": 331456537,
+  "live_count": 4,
+  "closed_count": 81906,
+  "returned_live": 1,
+  "returned_closed": 1,
+  "limit": 2,
+  "status": "all",
+  "markets": [
+    {
+      "crypto": "BTC",
+      "timeframe": "5m",
+      "market_id": "0x6e43e99a24370c407f513f3217f3092c769e74a4a819b365704060b61c289cc1",
+      "first_seen": "2026-11-11 18:30:15.202",
+      "last_seen": "2026-11-11 18:51:04.854",
+      "snapshot_count": "5447",
+      "category": "crypto",
+      "subcategory": "BTC",
+      "is_live": false,
+      "end_date": "2026-11-11 18:50:00.000",
+      "question": "Bitcoin Up or Down - November 11, 1:45PM-1:50PM ET",
+      "slug": "btc-updown-5m-1794422700",
+      "event_title": null,
+      "neg_risk_id": null,
+      "replay_locked": false
+    },
+    {
+      "category": "crypto",
+      "subcategory": "BTC",
+      "crypto": "BTC",
+      "timeframe": "5m",
+      "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+      "first_seen": "2026-11-11 18:35:38.724",
+      "last_seen": "2026-11-11 18:54:09.173",
+      "snapshot_count": 3979,
+      "is_live": true,
+      "end_date": "2026-11-11T18:55:00.000Z",
+      "question": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+      "slug": "btc-updown-5m-1794423000",
+      "event_title": null,
+      "neg_risk_id": null,
+      "replay_locked": false
+    }
+  ],
+  "replay_quota": { "unlimited": true }
+}
+```
+
+The keys are snake_case. `market_id` is the `conditionId`. `snapshot_count` can be a string, because it is a 64-bit count. The times of closed rows are UTC in the form `YYYY-MM-DD HH:MM:SS.mmm`.
+
+### GET /v1/markets/history
+
+All markets that have stored snapshots, in one response. The rows have the same keys as in `GET /v1/markets/history/recent`.
+
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category`, `subcategory`, `crypto`, `timeframe` | string | No | Filters, as in `GET /v1/markets/live` |
+| `limit` | number | No | Maximum number of markets (default: no limit, max: 5000) |
+| `since`, `before`, `order` | string | No | As in `GET /v1/markets/history/recent` |
+
+The route has no `offset` and no `status`. To read a long history, request one date range at a time with `since` and `before`.
+
+**Response:**
+
+```json
+{
+  "total_markets": 1,
+  "total_snapshots": 331456537,
+  "live_count": 1,
+  "closed_count": 0,
+  "markets": [
+    {
+      "crypto": "BTC",
+      "timeframe": "5m",
+      "market_id": "0x28894d481cd7c7238323914dc44abac7b97d1cfa8c0661ca24c09541306edd94",
+      "first_seen": "2026-11-11 18:40:44.202",
+      "last_seen": "2026-11-11 18:54:09.200",
+      "snapshot_count": "1074",
+      "category": "crypto",
+      "subcategory": "BTC",
+      "is_live": true,
+      "end_date": "2026-11-11T19:00:00.000Z",
+      "question": "Bitcoin Up or Down - November 11, 1:55PM-2:00PM ET"
+    }
+  ]
 }
 ```
 
@@ -176,29 +260,38 @@ Look up a market by its URL slug.
 |-------|------|-------------|
 | `slug` | string | Market URL slug |
 
-**Example:** `GET /v1/markets/by-slug/will-btc-be-above-100000-on-march-25`
+**Example:** `GET /v1/markets/by-slug/btc-updown-5m-1794423000`
 
 **Response:**
 
 ```json
 {
-  "market": {
-    "conditionId": "0x1234...",
-    "slug": "will-btc-be-above-100000-on-march-25",
-    "question": "Will BTC be above $100,000 on March 25?",
-    "category": "crypto",
-    "tokens": [...],
-    "endDate": "2026-03-25T00:00:00.000Z",
-    "active": true
-  }
+  "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "category": "crypto",
+  "subcategory": "BTC",
+  "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "crypto": "BTC",
+  "timeframe": "5m",
+  "slug": "btc-updown-5m-1794423000",
+  "question": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "token_ids": ["95010913097039662003166578407115840630830626265131174231608772954190451306599", "115630846830548204811025008874898652613314752354335076923695101212752692956310"],
+  "outcomes": ["Up", "Down"],
+  "token_id_up": "95010913097039662003166578407115840630830626265131174231608772954190451306599",
+  "token_id_down": "115630846830548204811025008874898652613314752354335076923695101212752692956310",
+  "end_date": "2026-11-11T18:55:00.000Z",
+  "active": true,
+  "expired": false,
+  "expires_in": 41765
 }
 ```
+
+The keys are snake_case, not the camelCase of `GET /v1/markets/live`. A closed market has `active: false` and `expired: true`, and also `event_title` and `neg_risk_id`.
 
 ### GET /v1/markets/by-slug/:slug/orderbook
 
 Live orderbook for a market looked up by slug.
 
-**Response:** Same structure as `GET /v1/markets/:id/orderbook`.
+**Response:** Same structure as `GET /v1/markets/:id/orderbook`, without `marketId` and `cryptoPrice`.
 
 ### GET /v1/markets/:id/orderbook
 
@@ -210,46 +303,61 @@ Live orderbook for a market by conditionId.
 |-------|------|-------------|
 | `id` | string | Market conditionId |
 
-**Response:**
+**Response** (`down` shortened; it has the same keys as `up`):
 
 ```json
 {
-  "market": {
-    "conditionId": "0x1234...",
-    "tokens": {
-      "UP": {
-        "tokenId": "abc123",
-        "bids": [
-          { "price": 0.65, "size": 1500.00 },
-          { "price": 0.64, "size": 2300.00 }
-        ],
-        "asks": [
-          { "price": 0.66, "size": 800.00 },
-          { "price": 0.67, "size": 1200.00 }
-        ],
-        "bestBid": 0.65,
-        "bestAsk": 0.66,
-        "midPrice": 0.655,
-        "spread": 0.01,
-        "totalBidDepth": 15000.00,
-        "totalAskDepth": 12000.00
-      },
-      "DOWN": {
-        "tokenId": "def456",
-        "bids": [...],
-        "asks": [...],
-        "bestBid": 0.34,
-        "bestAsk": 0.35,
-        "midPrice": 0.345,
-        "spread": 0.01,
-        "totalBidDepth": 14000.00,
-        "totalAskDepth": 11000.00
-      }
-    },
-    "timestamp": "2026-03-24T12:00:00.123Z"
+  "marketId": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "category": "crypto",
+  "subcategory": "BTC",
+  "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "question": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "timeframe": "5m",
+  "slug": "btc-updown-5m-1794423000",
+  "crypto": "BTC",
+  "cryptoPrice": 74422.005,
+  "crypto_price": 74422.005,
+  "up": {
+    "tokenId": "95010913097039662003166578407115840630830626265131174231608772954190451306599",
+    "marketId": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+    "timestamp": 1794423256499,
+    "eventTimestamp": 1794423256499,
+    "captureTimestamp": 1794423258327,
+    "sequenceNumber": 145140,
+    "cryptoPrice": 74422.005,
+    "cryptoPriceAgeMs": -1,
+    "crypto": "BTC",
+    "timeframe": "5m",
+    "category": "crypto",
+    "subcategory": "BTC",
+    "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+    "outcomeIndex": 0,
+    "bids": [{ "price": 0.52, "size": 1500 }, { "price": 0.51, "size": 2300 }],
+    "asks": [{ "price": 0.53, "size": 800 }, { "price": 0.54, "size": 1200 }],
+    "bestBid": 0.52,
+    "bestAsk": 0.53,
+    "midPrice": 0.525,
+    "spread": 0.01,
+    "bidDepth": 1953,
+    "askDepth": 1072
+  },
+  "down": {
+    "tokenId": "115630846830548204811025008874898652613314752354335076923695101212752692956310",
+    "outcomeIndex": 1,
+    "bids": [{ "price": 0.47, "size": 800 }, { "price": 0.46, "size": 1200 }],
+    "asks": [{ "price": 0.48, "size": 1500 }, { "price": 0.49, "size": 2300 }],
+    "bestBid": 0.47,
+    "bestAsk": 0.48,
+    "midPrice": 0.475,
+    "spread": 0.01,
+    "bidDepth": 928,
+    "askDepth": 1847
   }
 }
 ```
+
+`up` is the book of the first token (Up or Yes), `down` the book of the second (Down or No). A side is `null` when the server has no book for it yet. The book keys are camelCase, as in the WebSocket `orderbook` message. `bidDepth` and `askDepth` are the sum of price × size of each side. `cryptoPriceAgeMs` is always `-1` in this route. `crypto`, `cryptoPrice` and `crypto_price` are only on crypto markets. A market that is no longer live returns `410` with `"error": "market_expired"`.
 
 ### GET /v1/markets/:id/snapshots
 
@@ -265,42 +373,49 @@ Paginated historical orderbook snapshots.
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| `limit` | number | No | Results per page (default: 100, max: 1000) |
-| `offset` | number | No | Pagination offset |
+| `side` | string | No | Filter by side: `UP` or `DOWN` |
 | `from` | string | No | Start timestamp (ISO 8601) |
 | `to` | string | No | End timestamp (ISO 8601) |
-| `tokenSide` | string | No | Filter by token side: `UP` or `DOWN` |
+| `limit` | number | No | Rows per page (default: 500, max: 5000; max 2000 with `includebook=true`) |
+| `offset` | number | No | Pagination offset |
+| `order` | string | No | `desc` (default, newest first) or `asc` |
+| `includebook` | string | No | `true` adds the `bids` and `asks` arrays to each row |
 
 **Response:**
 
 ```json
 {
-  "snapshots": [
+  "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "total": 3979,
+  "limit": 500,
+  "offset": 0,
+  "data": [
     {
-      "tokenId": "abc123",
-      "tokenSide": "UP",
-      "bids": [
-        { "price": 0.65, "size": 1500.00 }
-      ],
-      "asks": [
-        { "price": 0.66, "size": 800.00 }
-      ],
-      "bestBid": 0.65,
-      "bestAsk": 0.66,
-      "midPrice": 0.655,
+      "timestamp": "2026-11-11 18:54:09.173",
+      "token_side": "DOWN",
+      "outcome_index": 1,
+      "crypto": "BTC",
+      "category": "crypto",
+      "subcategory": "BTC",
+      "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+      "timeframe": "5m",
+      "crypto_price": 74426.005,
+      "best_bid": 0.47,
+      "best_ask": 0.48,
+      "mid_price": 0.475,
       "spread": 0.01,
-      "totalBidDepth": 15000.00,
-      "totalAskDepth": 12000.00,
-      "eventTimestamp": "2026-03-24T12:00:00.100Z",
-      "captureTimestamp": "2026-03-24T12:00:00.123Z",
-      "sequenceNumber": 42567
+      "bid_depth_total": 928,
+      "ask_depth_total": 1847,
+      "event_timestamp": "2026-11-11 18:54:09.173",
+      "capture_timestamp": "2026-11-11 18:54:09.172",
+      "sequence_number": "143433",
+      "crypto_price_age_ms": 33
     }
-  ],
-  "total": 50000,
-  "limit": 100,
-  "offset": 0
+  ]
 }
 ```
+
+The rows are in `data`, and their keys are snake_case. The times are UTC in the form `YYYY-MM-DD HH:MM:SS.mmm`. `sequence_number` is a string. `bid_depth_total` and `ask_depth_total` are the sum of price × size of each side. `crypto_price_age_ms` is the age of the coin price when the snapshot was captured.
 
 ### GET /v1/markets/:id/summary
 
@@ -316,21 +431,35 @@ Aggregated market statistics.
 
 ```json
 {
-  "summary": {
-    "conditionId": "0x1234...",
-    "avgSpread": 0.012,
-    "minSpread": 0.005,
-    "maxSpread": 0.025,
-    "avgMidPrice": 0.652,
-    "priceRange": { "low": 0.58, "high": 0.72 },
-    "avgBidDepth": 14500.00,
-    "avgAskDepth": 12300.00,
-    "snapshotCount": 85000,
-    "tradeCount": 3200,
-    "period": "24h"
-  }
+  "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "category": "crypto",
+  "crypto": "BTC",
+  "timeframe": "5m",
+  "subcategory": "BTC",
+  "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "snapshot_count": 3979,
+  "first_seen": "2026-11-11 18:35:38.724",
+  "last_seen": "2026-11-11 18:54:09.173",
+  "avg_mid_price": 0.5002,
+  "min_mid_price": 0.005,
+  "max_mid_price": 0.995,
+  "avg_spread": 0.0102,
+  "min_spread": 0.01,
+  "max_spread": 0.04,
+  "avg_crypto_price": 74518.86,
+  "min_crypto_price": 74426.005,
+  "max_crypto_price": 74644.595,
+  "avg_bid_depth": 10776.33,
+  "avg_ask_depth": 90263.65,
+  "question": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "sides": [
+    { "token_side": "DOWN", "snapshots": "1990", "avg_bid": 0.6973, "avg_ask": 0.5572, "avg_mid": 0.7024, "max_bid": 0.99, "min_ask": 0 },
+    { "token_side": "UP", "snapshots": "1989", "avg_bid": 0.2929, "avg_ask": 0.3031, "avg_mid": 0.298, "max_bid": 0.5, "min_ask": 0.01 }
+  ]
 }
 ```
+
+`crypto` and the `*_crypto_price` keys are only on crypto markets.
 
 ---
 
@@ -338,48 +467,100 @@ Aggregated market statistics.
 
 ### GET /api/snapshot
 
-Retrieve a historical snapshot at a specific timestamp.
+Retrieve the newest snapshot at or before a timestamp. The search goes back at most 1 hour.
 
 **Query Parameters:**
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `timestamp` | string | Yes | ISO 8601 timestamp |
-| `marketId` | string | Yes | Market conditionId |
+| `marketId` | string | No | Market conditionId |
+| `crypto` | string | No | Filter by coin |
+| `timeframe` | string | No | Filter by timeframe |
+| `includebook` | string | No | `true` adds the `bids` and `asks` arrays |
 
-**Example:** `GET /api/snapshot?timestamp=2026-03-24T12:00:00Z&marketId=0x1234`
+**Example:** `GET /api/snapshot?timestamp=2026-11-11T18:53:50Z&marketId=0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589`
 
-**Response:**
+**Response** (`down` shortened; it has the same keys as `up`):
 
 ```json
 {
-  "snapshot": {
-    "tokenId": "abc123",
-    "tokenSide": "UP",
-    "bids": [...],
-    "asks": [...],
-    "bestBid": 0.65,
-    "bestAsk": 0.66,
-    "midPrice": 0.655,
+  "up": {
+    "crypto": "BTC",
+    "timeframe": "5m",
+    "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+    "token_id": "95010913097039662003166578407115840630830626265131174231608772954190451306599",
+    "token_side": "UP",
+    "timestamp": "2026-11-11 18:53:48.937",
+    "category": "crypto",
+    "subcategory": "BTC",
+    "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+    "crypto_price": 74444.005,
+    "best_bid": 0.52,
+    "best_ask": 0.53,
+    "mid_price": 0.525,
     "spread": 0.01,
-    "eventTimestamp": "2026-03-24T12:00:00.100Z",
-    "captureTimestamp": "2026-03-24T12:00:00.123Z",
-    "sequenceNumber": 42567,
-    "cryptoPriceStalenessMs": 45
-  }
+    "bid_depth_total": 1953,
+    "ask_depth_total": 1072,
+    "outcome_index": 0
+  },
+  "down": {
+    "token_id": "115630846830548204811025008874898652613314752354335076923695101212752692956310",
+    "token_side": "DOWN",
+    "best_bid": 0.47,
+    "best_ask": 0.48,
+    "mid_price": 0.475,
+    "spread": 0.01,
+    "outcome_index": 1
+  },
+  "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+  "timestamp": "2026-11-11 18:53:48.937",
+  "category": "crypto",
+  "subcategory": "BTC",
+  "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+  "crypto": "BTC",
+  "timeframe": "5m",
+  "crypto_price": 74444.005
 }
 ```
 
+With `marketId`, the response holds one row for each side in `up` and `down` (`null` when a side has no row). Without `marketId`, the response is an array of up to 2 rows.
+
 ### GET /api/snapshot/latest
 
-Retrieve the last 5 snapshots across all tokens.
+Retrieve the 5 newest snapshot rows of the last 10 minutes, across the markets that your plan can see.
 
-**Response:**
+**Query Parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `crypto` | string | No | Filter by coin |
+| `timeframe` | string | No | Filter by timeframe |
+| `includebook` | string | No | `true` adds the `bids` and `asks` arrays |
+
+**Response:** an array of up to 5 rows (shortened to 1 here).
 
 ```json
-{
-  "snapshots": [...]
-}
+[
+  {
+    "crypto": "BTC",
+    "timeframe": "5m",
+    "market_id": "0x9a7cd239b4f9b4a9cbafd47ac8ff28ed9ec473897c419f1aebd91a30d7adb589",
+    "token_id": "95010913097039662003166578407115840630830626265131174231608772954190451306599",
+    "token_side": "UP",
+    "timestamp": "2026-11-11 18:54:09.377",
+    "category": "crypto",
+    "subcategory": "BTC",
+    "label": "Bitcoin Up or Down - November 11, 1:50PM-1:55PM ET",
+    "crypto_price": 74426.005,
+    "best_bid": 0.52,
+    "best_ask": 0.53,
+    "mid_price": 0.525,
+    "spread": 0.01,
+    "bid_depth_total": 1953,
+    "ask_depth_total": 1072
+  }
+]
 ```
 
 ---
@@ -643,45 +824,57 @@ X-RateLimit-Reset: 1711278060
 
 ## Data Model Reference
 
-### Market
+### Market (item of `GET /v1/markets/live`)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `conditionId` | string | Unique market identifier (hex) |
-| `slug` | string | URL-friendly market identifier |
+| `slug` | string | URL slug of the Polymarket event. The markets of one event (such as the strikes of a hit-price day) share one slug |
 | `question` | string | Human-readable market question |
+| `label` | string | Short label, such as the strike of a hit-price market |
 | `category` | string | One of: crypto, equities, social, sports, economics, weather |
-| `tokens` | Token[] | UP and DOWN tokens with orderbooks |
-| `endDate` | string | Market resolution date (ISO 8601) |
-| `active` | boolean | Whether market is currently trading |
+| `subcategory` | string | The coin of a crypto market, else a group such as `NBA`, `FOMC` or a city |
+| `configId` | string | Market config, as in `GET /v1/categories` |
+| `timeframe` | string | Such as `5m`, `1d`, `hit-price`, `daily-high`, `game` or `rates` |
+| `tokenIds` | string[] | Token ids. `tokenIds[0]` is the Up or Yes token, `tokenIds[1]` the Down or No token |
+| `outcomes` | string[] | Outcome names, in the order of `tokenIds` |
+| `endDate` | string | End of the market (ISO 8601) |
+| `startDate` | string or null | Start of an up/down window (ISO 8601); `null` when the start is not known |
+| `status` | string | `upcoming`, `live`, `settling` or `expired` |
+| `expiresIn` | number | Milliseconds until `endDate` (0 after it) |
 
-### Token
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `tokenId` | string | Unique token identifier |
-| `outcome` | string | "Yes" or "No" |
-| `side` | string | "UP" or "DOWN" |
-| `price` | number | Current token price (0-1) |
-
-### Orderbook Snapshot
+### Orderbook side (`up` and `down` of `GET /v1/markets/:id/orderbook` and of the WebSocket `orderbook` message)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `tokenId` | string | Token this snapshot belongs to |
-| `tokenSide` | string | "UP" or "DOWN" |
-| `bids` | Level[] | Bid levels sorted by price descending |
-| `asks` | Level[] | Ask levels sorted by price ascending |
-| `bestBid` | number | Highest bid price |
-| `bestAsk` | number | Lowest ask price |
-| `midPrice` | number | (bestBid + bestAsk) / 2 |
-| `spread` | number | bestAsk - bestBid |
-| `totalBidDepth` | number | Sum of all bid sizes |
-| `totalAskDepth` | number | Sum of all ask sizes |
-| `eventTimestamp` | string | When Polymarket emitted the event |
-| `captureTimestamp` | string | When our server processed it |
-| `sequenceNumber` | number | For gap detection in the stream |
-| `cryptoPriceStalenessMs` | number | Ms since last crypto price update |
+| `tokenId` | string | Token of this book |
+| `bids` | Level[] | Bid levels, highest price first |
+| `asks` | Level[] | Ask levels, lowest price first |
+| `bestBid` | number | Highest bid price (0 when there are no bids) |
+| `bestAsk` | number | Lowest ask price (0 when there are no asks) |
+| `midPrice` | number | (bestBid + bestAsk) / 2; with no asks, the ask counts as 1 |
+| `spread` | number | bestAsk - bestBid; with no asks, the ask counts as 1 |
+| `bidDepth` | number | Sum of price × size of the bids |
+| `askDepth` | number | Sum of price × size of the asks |
+| `timestamp` | number | Time of the last change of the book (epoch ms) |
+| `sequenceNumber` | number | Sequence number of the last change, for gap detection |
+
+### Snapshot row (`data` of `GET /v1/markets/:id/snapshots`, and the rows of `/api/snapshot`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `token_side` | string | "UP" or "DOWN" |
+| `timestamp` | string | Snapshot time, UTC (`YYYY-MM-DD HH:MM:SS.mmm`) |
+| `best_bid` | number | Highest bid price |
+| `best_ask` | number | Lowest ask price |
+| `mid_price` | number | Mid price, computed as `midPrice` above |
+| `spread` | number | Spread, computed as `spread` above |
+| `bid_depth_total` | number | Sum of price × size of the bids |
+| `ask_depth_total` | number | Sum of price × size of the asks |
+| `crypto_price` | number | Coin price when the snapshot was captured (crypto markets only) |
+| `bids`, `asks` | Level[] | Only with `includebook=true` |
+
+`GET /v1/markets/:id/snapshots` rows also have `event_timestamp`, `capture_timestamp`, `sequence_number` (a string) and `crypto_price_age_ms`. The `/api/snapshot` rows also have `market_id` and `token_id`.
 
 ### Level
 
@@ -690,15 +883,18 @@ X-RateLimit-Reset: 1711278060
 | `price` | number | Price level (0-1) |
 | `size` | number | Size at this level |
 
-### Trade
+### Trade (`data` of `GET /v1/markets/:id/trades`)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `tokenId` | string | Token traded |
+| `market_id` | string | Market conditionId |
+| `asset_id` | string | Token traded |
+| `token_side` | string | "UP" or "DOWN" (`null` when unknown) |
 | `price` | number | Trade price |
 | `size` | number | Trade size |
-| `side` | string | "buy" or "sell" |
-| `timestamp` | string | Trade timestamp (ISO 8601) |
+| `side` | string | "BUY" or "SELL" |
+| `timestamp` | string | Trade time, UTC (`YYYY-MM-DD HH:MM:SS.mmm`) |
+| `transaction_hash` | string | On-chain transaction hash |
 
 ---
 
@@ -708,7 +904,10 @@ There are 6 categories: crypto, equities, social, sports, economics and weather.
 
 ### Crypto
 
-Prediction markets on whether BTC, ETH, SOL, XRP, DOGE, HYPE, or BNB will be above/below certain price levels at specific times. Up/down markets span 5 timeframes: 5 minutes, 15 minutes, 1 hour, 4 hours, and 1 day.
+Two kinds of crypto markets:
+
+- **Up/down** (config `crypto-updown`): will BTC, ETH, SOL, XRP, DOGE, HYPE or BNB end a window higher or lower than it started? Up/down markets span 5 timeframes: 5 minutes, 15 minutes, 1 hour, 4 hours, and 1 day.
+- **Daily hit-price** (config `crypto-hit-price`, timeframe `hit-price`): will the coin reach a price level on a given day, such as "Will Bitcoin reach $81,000 on November 11?". Each strike level is one Yes/No market, and the strikes of one coin and day share one slug (`what-price-will-bitcoin-hit-on-november-11-2026`) and one `endDate`. Only the event of the current day is tracked. The coins depend on the events that Polymarket lists: on 2026-11-11, 46 markets on BTC, ETH, SOL and XRP. `GET /v1/markets/live?timeframe=hit-price` gives the live list.
 
 ### Equities
 

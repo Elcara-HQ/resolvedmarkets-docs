@@ -8,15 +8,15 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **tokenId** | Unique identifier for an individual token within a market. Binary markets have two tokenIds; grouped markets may have many. |
 | **slug** | Human-readable URL-friendly identifier for a market (e.g., `btc-updown-5m-1772448000`, `spx-opens-up-or-down-on-march-27-2026`). |
 | **spread** | Difference between best ask and best bid price. Smaller spread = tighter liquidity. |
-| **midPrice** | Average of best bid and best ask: `(bestBid + bestAsk) / 2`. Fair-value estimate for a token. |
+| **midPrice** | Average of best bid and best ask: `(bestBid + bestAsk) / 2`. Fair-value estimate for a token. An empty bid side counts as 0 and an empty ask side counts as 1, as on Polymarket; `spread` uses the same rule. `bestBid` or `bestAsk` itself shows 0 for an empty side. Snapshot rows call it `mid_price`. |
 | **bestBid** | Highest price a buyer is willing to pay. Top of the bid side. |
 | **bestAsk** | Lowest price a seller is willing to accept. Top of the ask side. |
-| **totalBidDepth** | Sum of all order sizes on the bid side of the orderbook. |
-| **totalAskDepth** | Sum of all order sizes on the ask side of the orderbook. |
+| **bidDepth** | Sum of price × size over all levels on the bid side of the orderbook. Snapshot rows call it `bid_depth_total`. |
+| **askDepth** | Sum of price × size over all levels on the ask side of the orderbook. Snapshot rows call it `ask_depth_total`. |
 | **eventTimestamp** | Timestamp when Polymarket emitted the WebSocket event. |
 | **captureTimestamp** | Timestamp when the backend processed and stored the snapshot. Difference from eventTimestamp = ingestion latency. |
 | **sequenceNumber** | Incrementing counter per token for gap detection. Non-consecutive numbers indicate throttling or deduplication. |
-| **cryptoPriceStalenessMs** | Milliseconds since last crypto price update from Binance. Low values = fresh; high values = stale feed. |
+| **crypto_price_age_ms** | Milliseconds from the last update of the coin price to the capture of the snapshot. Low values = fresh; high values = stale feed. `-1` means unknown or not a crypto market. BTC, ETH, SOL, XRP, DOGE and BNB prices come from the Binance best bid and ask (`bookTicker`); HYPE comes from Hyperliquid `allMids`. The live orderbook routes return `cryptoPriceAgeMs` as `-1`. |
 | **token_side** | Enum: `UP` or `DOWN`. Indicates which side of a binary market a token represents. For Yes/No markets, Yes maps to UP, No maps to DOWN. |
 | **negRisk / grouped market** | A Polymarket event with multiple sub-markets (e.g., Elon tweet count ranges with ~30 binary sub-markets). Each sub-market has its own conditionId and is tracked independently. |
 | **CLOB** | Central Limit Order Book. Polymarket's matching engine. Resolved Markets connects via WebSocket to stream orderbook data. |
@@ -30,7 +30,7 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
 | **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
 | **market category** | Classification of tracked markets: crypto, equities (stock indices, stocks, earnings, commodities, forex and more), social (Elon tweets), sports (NBA, NFL, EPL, FIFA World Cup, tennis), economics (FOMC/NFP), weather (temperatures/hurricanes). |
-| **timeframe** | Duration window for a market. Crypto up/down: 5m, 15m, 1h, 4h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
+| **timeframe** | Duration window or type of a market. Crypto up/down: `5m`, `15m`, `1h`, `4h`, `1d`. Crypto hit-price: `hit-price`. Stock indices: `1d`, `monthly`, `annual`. Elon tweets: `weekly`. Sports: `game`. Fed rates: `rates` (rows captured before 2026-07-15 can have `meeting` or `annual`). Non-Farm Payrolls: `monthly`. Daily temperatures: `daily-high`, `daily-low`. Other configs use `event`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`, `earnings`, `seasonal`, `valuation`, `comparison` and `leaderboard`. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |
 | **NOWPayments** | Crypto payment gateway for tier upgrades and credit packs. Supports 200+ cryptocurrencies. |
 | **Hyperliquid** | On-chain perpetual futures exchange. Resolved Markets collects L2 orderbook data for BTC, ETH, SOL, XRP, DOGE, HYPE, BNB perps. |

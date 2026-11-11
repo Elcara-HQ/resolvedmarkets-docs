@@ -59,8 +59,8 @@ const API_KEY = "rm_your_key";
 const res = await fetch("https://api.resolvedmarkets.com/v1/markets/live", {
   headers: { "X-API-Key": API_KEY }
 });
-const data = await res.json();
-console.log(data.markets);
+const markets = await res.json();
+console.log(markets);
 ```
 
 ### Python

@@ -67,7 +67,7 @@ Each connection follows one coin: a new `subscribe` replaces the last one. The s
 
 | Category | Examples |
 |----------|----------|
-| **Crypto** | BTC, ETH, SOL, XRP, DOGE, HYPE, BNB up/down prediction markets (5m, 15m, 1h, 4h, 1d) |
+| **Crypto** | BTC, ETH, SOL, XRP, DOGE, HYPE, BNB up/down prediction markets (5m, 15m, 1h, 4h, 1d); daily hit-price markets (timeframe `hit-price`; BTC, ETH, SOL and XRP on 2026-11-11) |
 | **Equities** | Stock indices (S&P 500 and others), stocks, earnings, commodities, forex, private companies, IPOs, acquisitions, company KPIs |
 | **Social** | Elon Musk weekly tweet count ranges (grouped, ~30 sub-markets) |
 | **Sports** | NBA, NFL, EPL, FIFA World Cup, ATP and WTA tennis match outcomes |

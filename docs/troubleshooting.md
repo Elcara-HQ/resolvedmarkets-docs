@@ -123,11 +123,11 @@ Valid crypto values are `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, and `BNB`.
 
 ### Stale crypto prices in snapshot data
 
-**Symptom:** The `cryptoPriceStalenessMs` field in snapshots shows large values (several seconds or more), and the associated crypto price looks outdated.
+**Symptom:** The `crypto_price_age_ms` field of snapshot rows shows large values (several seconds or more), and the `crypto_price` looks outdated.
 
-**Cause:** The backend streams real-time trades from Binance WebSocket to track current crypto prices. If the Binance WebSocket connection drops or experiences issues, the last known price becomes stale. The `cryptoPriceStalenessMs` field measures how many milliseconds have elapsed since the last Binance price update.
+**Cause:** The backend reads coin prices from two WebSocket feeds: the Binance best bid and ask (`bookTicker`) for BTC, ETH, SOL, XRP, DOGE and BNB, and Hyperliquid `allMids` for HYPE. If a feed drops, the last known price becomes stale. `crypto_price_age_ms` is the number of milliseconds from the last price update of the coin to the capture of the snapshot. `-1` means that the age is not known or that the market is not a crypto market.
 
-**Fix:** Check the `cryptoPriceStalenessMs` value before relying on the crypto price. Values under 1000ms are generally fresh. If you consistently see high staleness, the backend's Binance connection may need attention. For self-hosted instances, check the backend logs for WebSocket reconnection errors.
+**Fix:** Check the `crypto_price_age_ms` value before relying on the crypto price. Values under 1000ms are generally fresh. If you consistently see high values, the price feed of the backend may need attention. For self-hosted instances, check the backend logs for WebSocket reconnection errors.
 
 ---
 

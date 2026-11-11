@@ -5,20 +5,20 @@ Copy-paste recipes for the Resolved Markets API. Every example is complete and r
 **Base URL:** `https://api.resolvedmarkets.com`
 **Auth:** `X-API-Key: rm_your_key` header on all requests.
 
-Replace `rm_your_key` with your actual API key and `YOUR_MARKET_ID` / `YOUR_TOKEN_ID` with real IDs from the `/v1/markets/live` endpoint.
+Replace `rm_your_key` with your actual API key and `YOUR_MARKET_ID` with the `conditionId` of a market from the `/v1/markets/live` endpoint. The JavaScript recipes need Node.js 18 or later; save a recipe that uses `import` or a top-level `await` as a `.mjs` file.
 
 ---
 
 ## 1. Get the Current BTC Spread
 
-Fetch the live orderbook for a BTC market and extract the bid-ask spread.
+Fetch the live orderbook for a BTC market and read the bid-ask spread of its UP book. `up` is `null` when the server has no book for that side yet.
 
 ### cURL
 
 ```bash
 curl -s -H "X-API-Key: rm_your_key" \
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook" | \
-  jq '.tokens[0] | {bestBid, bestAsk, spread: (.bestAsk - .bestBid)}'
+  jq '.up | {bestBid, bestAsk, spread}'
 ```
 
 ### JavaScript
@@ -28,10 +28,10 @@ const res = await fetch(
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
   { headers: { "X-API-Key": "rm_your_key" } }
 );
-const data = await res.json();
-const token = data.tokens[0];
-const spread = token.bestAsk - token.bestBid;
-console.log(`Best Bid: ${token.bestBid}, Best Ask: ${token.bestAsk}, Spread: ${spread.toFixed(4)}`);
+const { up } = await res.json();
+if (up) {
+  console.log(`Best Bid: ${up.bestBid}, Best Ask: ${up.bestAsk}, Spread: ${up.spread.toFixed(4)}`);
+}
 ```
 
 ### Python
@@ -43,10 +43,9 @@ res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook",
     headers={"X-API-Key": "rm_your_key"},
 )
-data = res.json()
-token = data["tokens"][0]
-spread = token["bestAsk"] - token["bestBid"]
-print(f"Best Bid: {token['bestBid']}, Best Ask: {token['bestAsk']}, Spread: {spread:.4f}")
+up = res.json()["up"]
+if up:
+    print(f"Best Bid: {up['bestBid']}, Best Ask: {up['bestAsk']}, Spread: {up['spread']:.4f}")
 ```
 
 ---
@@ -153,20 +152,23 @@ ws = websocket.WebSocketApp(
 ws.run_forever()
 ```
 
-### cURL
+### websocat
+
+cURL has no WebSocket support, so this recipe uses [websocat](https://github.com/vi/websocat). The command sends the auth message, waits 2 seconds for the auth reply, and then subscribes to one coin on the same connection. `-n` keeps the connection open after the two messages. `-B` raises the message size limit of websocat (64 KiB by default): the first `markets` message is about 95 KB on Pro and about 4.6 MB on Scale and Enterprise. `jq` prints one short line for each message. The stream runs until you press Ctrl+C.
 
 ```bash
-# cURL does not support WebSockets natively. Use websocat instead:
-echo '{"type":"auth","apiKey":"rm_your_key"}' | \
-  websocat "wss://api.resolvedmarkets.com/ws/orderbook" --text -n1
-# Then send: {"type":"subscribe","crypto":"BTC"}
+(echo '{"type":"auth","apiKey":"rm_your_key"}'; sleep 2; echo '{"type":"subscribe","crypto":"BTC"}') | \
+  websocat -n -B 16777216 --text "wss://api.resolvedmarkets.com/ws/orderbook" | \
+  jq -c 'if .type == "markets" then {type, count: (.data | length)} elif .type == "orderbook" then {type, count: (.markets | length), up_mid: [.markets[] | .up.midPrice?]} else . end'
 ```
+
+You see `{"type":"auth","status":"ok"}`, then one `markets` line, then one `orderbook` line every 2 seconds.
 
 ---
 
-## 4. Download 24h of Historical Snapshots to CSV
+## 4. Download 24h of Historical Snapshots
 
-Fetch the last 24 hours of snapshots for a token and write them to a CSV file.
+Fetch the snapshots of the last 24 hours for a market and write them to a CSV file. One page holds up to 5,000 rows, newest first; recipe 10 pages through more rows.
 
 ### cURL
 
@@ -176,14 +178,14 @@ TO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 curl -s -H "X-API-Key: rm_your_key" \
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&limit=5000" | \
-  jq -r '["timestamp","bestBid","bestAsk","midPrice","spread"], (.[] | [.captureTimestamp,.bestBid,.bestAsk,.midPrice,.spread]) | @csv' \
+  jq -r '["timestamp","token_side","best_bid","best_ask","mid_price","spread"], (.data[] | [.timestamp,.token_side,.best_bid,.best_ask,.mid_price,.spread]) | @csv' \
   > snapshots_24h.csv
 ```
 
 ### JavaScript
 
 ```javascript
-const fs = require("fs");
+import fs from "node:fs";
 
 const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const to = new Date().toISOString();
@@ -192,15 +194,15 @@ const res = await fetch(
   `https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=${from}&to=${to}&limit=5000`,
   { headers: { "X-API-Key": "rm_your_key" } }
 );
-const snapshots = await res.json();
+const { data } = await res.json();
 
-const header = "timestamp,bestBid,bestAsk,midPrice,spread\n";
-const rows = snapshots
-  .map((s) => `${s.captureTimestamp},${s.bestBid},${s.bestAsk},${s.midPrice},${s.spread}`)
+const header = "timestamp,token_side,best_bid,best_ask,mid_price,spread\n";
+const rows = data
+  .map((s) => `${s.timestamp},${s.token_side},${s.best_bid},${s.best_ask},${s.mid_price},${s.spread}`)
   .join("\n");
 
 fs.writeFileSync("snapshots_24h.csv", header + rows);
-console.log(`Wrote ${snapshots.length} rows to snapshots_24h.csv`);
+console.log(`Wrote ${data.length} rows to snapshots_24h.csv`);
 ```
 
 ### Python
@@ -211,24 +213,26 @@ import requests
 from datetime import datetime, timedelta, timezone
 
 now = datetime.now(timezone.utc)
-from_ts = (now - timedelta(hours=24)).isoformat()
-to_ts = now.isoformat()
+from_ts = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+to_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 res = requests.get(
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots",
     headers={"X-API-Key": "rm_your_key"},
     params={"from": from_ts, "to": to_ts, "limit": 5000},
 )
-snapshots = res.json()
+rows = res.json()["data"]
 
 with open("snapshots_24h.csv", "w", newline="") as f:
     writer = csv.writer(f)
-    writer.writerow(["timestamp", "bestBid", "bestAsk", "midPrice", "spread"])
-    for s in snapshots:
-        writer.writerow([s["captureTimestamp"], s["bestBid"], s["bestAsk"], s["midPrice"], s["spread"]])
+    writer.writerow(["timestamp", "token_side", "best_bid", "best_ask", "mid_price", "spread"])
+    for s in rows:
+        writer.writerow([s["timestamp"], s["token_side"], s["best_bid"], s["best_ask"], s["mid_price"], s["spread"]])
 
-print(f"Wrote {len(snapshots)} rows to snapshots_24h.csv")
+print(f"Wrote {len(rows)} rows to snapshots_24h.csv")
 ```
+
+Send `from` and `to` as `YYYY-MM-DDTHH:MM:SSZ`, as above. A time with an offset such as `+00:00` (the output of Python's `isoformat()`) gets an error.
 
 ---
 
@@ -249,12 +253,12 @@ async function checkSpread() {
     { headers: { "X-API-Key": API_KEY } }
   );
   const data = await res.json();
-  for (const token of data.tokens) {
-    const spread = token.bestAsk - token.bestBid;
-    if (spread > THRESHOLD) {
-      console.log(`ALERT [${token.tokenSide}] Spread ${spread.toFixed(4)} > ${THRESHOLD}`);
+  for (const [side, book] of [["UP", data.up], ["DOWN", data.down]]) {
+    if (!book) continue;
+    if (book.spread > THRESHOLD) {
+      console.log(`ALERT [${side}] Spread ${book.spread.toFixed(4)} > ${THRESHOLD}`);
     } else {
-      console.log(`OK    [${token.tokenSide}] Spread ${spread.toFixed(4)}`);
+      console.log(`OK    [${side}] Spread ${book.spread.toFixed(4)}`);
     }
   }
 }
@@ -279,10 +283,12 @@ while True:
         headers={"X-API-Key": API_KEY},
     )
     data = res.json()
-    for token in data["tokens"]:
-        spread = token["bestAsk"] - token["bestBid"]
-        tag = "ALERT" if spread > THRESHOLD else "OK   "
-        print(f"{tag} [{token['tokenSide']}] Spread {spread:.4f}")
+    for side in ("up", "down"):
+        book = data[side]
+        if not book:
+            continue
+        tag = "ALERT" if book["spread"] > THRESHOLD else "OK   "
+        print(f"{tag} [{side.upper()}] Spread {book['spread']:.4f}")
     time.sleep(10)
 ```
 
@@ -293,7 +299,7 @@ THRESHOLD=0.05
 while true; do
   curl -s -H "X-API-Key: rm_your_key" \
     "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook" | \
-    jq --argjson t "$THRESHOLD" '.tokens[] | {side: .tokenSide, spread: (.bestAsk - .bestBid)} | if .spread > $t then "ALERT \(.side) spread=\(.spread)" else "OK    \(.side) spread=\(.spread)" end'
+    jq -r --argjson t "$THRESHOLD" '{UP: .up, DOWN: .down} | to_entries[] | select(.value != null) | {side: .key, spread: .value.spread} | if .spread > $t then "ALERT \(.side) spread=\(.spread)" else "OK    \(.side) spread=\(.spread)" end'
   sleep 10
 done
 ```
@@ -302,14 +308,14 @@ done
 
 ## 6. Compare UP vs DOWN Liquidity
 
-Fetch the orderbook and compare total depth on the UP and DOWN sides.
+Fetch the orderbook and compare the depth of the UP and DOWN books. `bidDepth` and `askDepth` are the sum of price × size of each side.
 
 ### cURL
 
 ```bash
 curl -s -H "X-API-Key: rm_your_key" \
   "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/orderbook" | \
-  jq '.tokens[] | {side: .tokenSide, totalBidDepth, totalAskDepth, totalLiquidity: (.totalBidDepth + .totalAskDepth)}'
+  jq '{UP: .up, DOWN: .down} | to_entries[] | select(.value != null) | {side: .key, bidDepth: .value.bidDepth, askDepth: .value.askDepth, totalLiquidity: (.value.bidDepth + .value.askDepth)}'
 ```
 
 ### JavaScript
@@ -321,18 +327,18 @@ const res = await fetch(
 );
 const data = await res.json();
 
-for (const token of data.tokens) {
-  const total = token.totalBidDepth + token.totalAskDepth;
+const totals = {};
+for (const [side, book] of [["UP", data.up], ["DOWN", data.down]]) {
+  if (!book) continue;
+  totals[side] = book.bidDepth + book.askDepth;
   console.log(
-    `${token.tokenSide}: Bid Depth = ${token.totalBidDepth}, Ask Depth = ${token.totalAskDepth}, Total = ${total}`
+    `${side}: Bid Depth = ${book.bidDepth}, Ask Depth = ${book.askDepth}, Total = ${totals[side]}`
   );
 }
 
-const up = data.tokens.find((t) => t.tokenSide === "UP");
-const down = data.tokens.find((t) => t.tokenSide === "DOWN");
-const upTotal = up.totalBidDepth + up.totalAskDepth;
-const downTotal = down.totalBidDepth + down.totalAskDepth;
-console.log(`\nUP/DOWN liquidity ratio: ${(upTotal / downTotal).toFixed(2)}`);
+if (totals.UP && totals.DOWN) {
+  console.log(`\nUP/DOWN liquidity ratio: ${(totals.UP / totals.DOWN).toFixed(2)}`);
+}
 ```
 
 ### Python
@@ -347,38 +353,41 @@ res = requests.get(
 data = res.json()
 
 totals = {}
-for token in data["tokens"]:
-    total = token["totalBidDepth"] + token["totalAskDepth"]
-    totals[token["tokenSide"]] = total
-    print(f"{token['tokenSide']}: Bid={token['totalBidDepth']}, Ask={token['totalAskDepth']}, Total={total}")
+for side in ("up", "down"):
+    book = data[side]
+    if not book:
+        continue
+    total = book["bidDepth"] + book["askDepth"]
+    totals[side.upper()] = total
+    print(f"{side.upper()}: Bid={book['bidDepth']}, Ask={book['askDepth']}, Total={total}")
 
-ratio = totals["UP"] / totals["DOWN"]
-print(f"\nUP/DOWN liquidity ratio: {ratio:.2f}")
+if totals.get("UP") and totals.get("DOWN"):
+    print(f"\nUP/DOWN liquidity ratio: {totals['UP'] / totals['DOWN']:.2f}")
 ```
 
 ---
 
 ## 7. Get Market by Slug
 
-Look up a specific market using its URL slug.
+Look up a specific market using its URL slug. The response keys are snake_case: the market id is `market_id`.
 
 ### cURL
 
 ```bash
 curl -s -H "X-API-Key: rm_your_key" \
-  "https://api.resolvedmarkets.com/v1/markets/by-slug/will-btc-hit-100k-by-march"
+  "https://api.resolvedmarkets.com/v1/markets/by-slug/btc-updown-5m-1794423000"
 ```
 
 ### JavaScript
 
 ```javascript
-const slug = "will-btc-hit-100k-by-march";
+const slug = "btc-updown-5m-1794423000";
 const res = await fetch(
   `https://api.resolvedmarkets.com/v1/markets/by-slug/${slug}`,
   { headers: { "X-API-Key": "rm_your_key" } }
 );
 const market = await res.json();
-console.log(`${market.question} (ID: ${market.conditionId})`);
+console.log(`${market.question} (ID: ${market.market_id})`);
 ```
 
 ### Python
@@ -386,33 +395,28 @@ console.log(`${market.question} (ID: ${market.conditionId})`);
 ```python
 import requests
 
-slug = "will-btc-hit-100k-by-march"
+slug = "btc-updown-5m-1794423000"
 res = requests.get(
     f"https://api.resolvedmarkets.com/v1/markets/by-slug/{slug}",
     headers={"X-API-Key": "rm_your_key"},
 )
 market = res.json()
-print(f"{market['question']} (ID: {market['conditionId']})")
+print(f"{market['question']} (ID: {market['market_id']})")
 ```
 
 ---
 
-## 8. Paginate Through Historical Markets
+## 8. Walk Through Historical Markets by Date
 
-Loop through historical markets using limit and offset.
+The market history routes have no `offset`. Request one day at a time with `since` and `before`: a day returns the markets that were captured on that day. A market that spans midnight is in two days, so keep each `market_id` once. One request returns at most 5,000 markets; narrow the filters if a day reaches that limit.
 
 ### cURL
 
 ```bash
-OFFSET=0
-LIMIT=50
-while true; do
-  RESULT=$(curl -s -H "X-API-Key: rm_your_key" \
-    "https://api.resolvedmarkets.com/v1/markets/history/recent?limit=$LIMIT&offset=$OFFSET")
-  COUNT=$(echo "$RESULT" | jq 'length')
-  echo "Offset $OFFSET: got $COUNT markets"
-  [ "$COUNT" -lt "$LIMIT" ] && break
-  OFFSET=$((OFFSET + LIMIT))
+for DAY in 2026-11-08 2026-11-09 2026-11-10; do
+  curl -s -H "X-API-Key: rm_your_key" \
+    "https://api.resolvedmarkets.com/v1/markets/history?crypto=BTC&since=$DAY&before=${DAY}T23:59:59Z&limit=5000" | \
+    jq -r --arg day "$DAY" '"\($day): \(.markets | length) markets"'
 done
 ```
 
@@ -420,23 +424,20 @@ done
 
 ```javascript
 const API_KEY = "rm_your_key";
-const LIMIT = 50;
-let offset = 0;
-let allMarkets = [];
+const days = ["2026-11-08", "2026-11-09", "2026-11-10"];
+const allMarkets = new Map();
 
-while (true) {
+for (const day of days) {
   const res = await fetch(
-    `https://api.resolvedmarkets.com/v1/markets/history/recent?limit=${LIMIT}&offset=${offset}`,
+    `https://api.resolvedmarkets.com/v1/markets/history?crypto=BTC&since=${day}&before=${day}T23:59:59Z&limit=5000`,
     { headers: { "X-API-Key": API_KEY } }
   );
-  const batch = await res.json();
-  allMarkets.push(...batch);
-  console.log(`Fetched ${batch.length} markets at offset ${offset}`);
-  if (batch.length < LIMIT) break;
-  offset += LIMIT;
+  const { markets } = await res.json();
+  for (const m of markets) allMarkets.set(m.market_id, m);
+  console.log(`${day}: ${markets.length} markets`);
 }
 
-console.log(`Total: ${allMarkets.length} historical markets`);
+console.log(`Total: ${allMarkets.size} historical markets`);
 ```
 
 ### Python
@@ -445,22 +446,19 @@ console.log(`Total: ${allMarkets.length} historical markets`);
 import requests
 
 API_KEY = "rm_your_key"
-LIMIT = 50
-offset = 0
-all_markets = []
+days = ["2026-11-08", "2026-11-09", "2026-11-10"]
+all_markets = {}
 
-while True:
+for day in days:
     res = requests.get(
-        "https://api.resolvedmarkets.com/v1/markets/history/recent",
+        "https://api.resolvedmarkets.com/v1/markets/history",
         headers={"X-API-Key": API_KEY},
-        params={"limit": LIMIT, "offset": offset},
+        params={"crypto": "BTC", "since": day, "before": f"{day}T23:59:59Z", "limit": 5000},
     )
-    batch = res.json()
-    all_markets.extend(batch)
-    print(f"Fetched {len(batch)} markets at offset {offset}")
-    if len(batch) < LIMIT:
-        break
-    offset += LIMIT
+    markets = res.json()["markets"]
+    for m in markets:
+        all_markets[m["market_id"]] = m
+    print(f"{day}: {len(markets)} markets")
 
 print(f"Total: {len(all_markets)} historical markets")
 ```
@@ -488,17 +486,17 @@ for (const market of markets) {
     `https://api.resolvedmarkets.com/v1/markets/${market.conditionId}/orderbook`,
     { headers: { "X-API-Key": API_KEY } }
   );
+  if (!obRes.ok) continue;
   const ob = await obRes.json();
-  for (const token of ob.tokens) {
-    const spread = token.bestAsk - token.bestBid;
-    results.push({ slug: market.slug, side: token.tokenSide, spread });
+  for (const [side, book] of [["UP", ob.up], ["DOWN", ob.down]]) {
+    if (book) results.push({ question: market.question, side, spread: book.spread });
   }
 }
 
 results.sort((a, b) => a.spread - b.spread);
 console.log("Top 5 tightest spreads:");
 results.slice(0, 5).forEach((r) =>
-  console.log(`  ${r.spread.toFixed(4)} — ${r.slug} (${r.side})`)
+  console.log(`  ${r.spread.toFixed(4)} — ${r.question} (${r.side})`)
 );
 ```
 
@@ -516,31 +514,33 @@ markets = requests.get(
 
 results = []
 for market in markets:
-    ob = requests.get(
+    res = requests.get(
         f"https://api.resolvedmarkets.com/v1/markets/{market['conditionId']}/orderbook",
         headers={"X-API-Key": API_KEY},
-    ).json()
-    for token in ob["tokens"]:
-        spread = token["bestAsk"] - token["bestBid"]
-        results.append({"slug": market["slug"], "side": token["tokenSide"], "spread": spread})
+    )
+    if not res.ok:
+        continue
+    ob = res.json()
+    for side in ("up", "down"):
+        if ob[side]:
+            results.append({"question": market["question"], "side": side.upper(), "spread": ob[side]["spread"]})
 
 results.sort(key=lambda r: r["spread"])
 print("Top 5 tightest spreads:")
 for r in results[:5]:
-    print(f"  {r['spread']:.4f} — {r['slug']} ({r['side']})")
+    print(f"  {r['spread']:.4f} — {r['question']} ({r['side']})")
 ```
 
 ### cURL
 
 ```bash
-# Fetch all markets, then query each orderbook and sort by spread
 MARKETS=$(curl -s -H "X-API-Key: rm_your_key" \
   "https://api.resolvedmarkets.com/v1/markets/live?category=crypto")
 
 echo "$MARKETS" | jq -r '.[].conditionId' | while read -r ID; do
   curl -s -H "X-API-Key: rm_your_key" \
     "https://api.resolvedmarkets.com/v1/markets/$ID/orderbook" | \
-    jq -r --arg id "$ID" '.tokens[] | "\(.bestAsk - .bestBid) \($id) \(.tokenSide)"'
+    jq -r --arg id "$ID" '{UP: .up, DOWN: .down} | to_entries[] | select(.value != null) | "\(.value.spread) \($id) \(.key)"'
 done | sort -n | head -5
 ```
 
@@ -548,47 +548,44 @@ done | sort -n | head -5
 
 ## 10. Export Snapshots for Backtesting
 
-Query snapshots for a specific token side within a time range, suitable for backtesting strategies.
+Query the snapshots of one side of a market within a time range, oldest first, and page through all of them.
 
 ### JavaScript
 
 ```javascript
-const fs = require("fs");
+import fs from "node:fs";
 
 const API_KEY = "rm_your_key";
 const MARKET_ID = "YOUR_MARKET_ID";
-const TOKEN_SIDE = "UP";
+const SIDE = "UP";
 const FROM = "2026-03-25T00:00:00Z";
 const TO = "2026-03-26T00:00:00Z";
 const LIMIT = 5000;
 
 let offset = 0;
-let allSnapshots = [];
+const allSnapshots = [];
 
 while (true) {
   const url = new URL(`https://api.resolvedmarkets.com/v1/markets/${MARKET_ID}/snapshots`);
   url.searchParams.set("from", FROM);
   url.searchParams.set("to", TO);
-  url.searchParams.set("tokenSide", TOKEN_SIDE);
-  url.searchParams.set("limit", LIMIT);
-  url.searchParams.set("offset", offset);
+  url.searchParams.set("side", SIDE);
+  url.searchParams.set("order", "asc");
+  url.searchParams.set("limit", String(LIMIT));
+  url.searchParams.set("offset", String(offset));
 
   const res = await fetch(url, { headers: { "X-API-Key": API_KEY } });
-  const batch = await res.json();
-  allSnapshots.push(...batch);
-  console.log(`Fetched ${batch.length} snapshots at offset ${offset}`);
-  if (batch.length < LIMIT) break;
+  const { data } = await res.json();
+  allSnapshots.push(...data);
+  console.log(`Fetched ${data.length} snapshots at offset ${offset}`);
+  if (data.length < LIMIT) break;
   offset += LIMIT;
 }
 
-const header = "captureTimestamp,bestBid,bestAsk,midPrice,spread,totalBidDepth,totalAskDepth\n";
-const rows = allSnapshots
-  .map((s) =>
-    [s.captureTimestamp, s.bestBid, s.bestAsk, s.midPrice, s.spread, s.totalBidDepth, s.totalAskDepth].join(",")
-  )
-  .join("\n");
+const fields = ["timestamp", "best_bid", "best_ask", "mid_price", "spread", "bid_depth_total", "ask_depth_total"];
+const rows = allSnapshots.map((s) => fields.map((k) => s[k]).join(","));
 
-fs.writeFileSync("backtest_data.csv", header + rows);
+fs.writeFileSync("backtest_data.csv", [fields.join(","), ...rows].join("\n"));
 console.log(`Exported ${allSnapshots.length} snapshots to backtest_data.csv`);
 ```
 
@@ -600,7 +597,7 @@ import requests
 
 API_KEY = "rm_your_key"
 MARKET_ID = "YOUR_MARKET_ID"
-TOKEN_SIDE = "UP"
+SIDE = "UP"
 FROM = "2026-03-25T00:00:00Z"
 TO = "2026-03-26T00:00:00Z"
 LIMIT = 5000
@@ -615,19 +612,20 @@ while True:
         params={
             "from": FROM,
             "to": TO,
-            "tokenSide": TOKEN_SIDE,
+            "side": SIDE,
+            "order": "asc",
             "limit": LIMIT,
             "offset": offset,
         },
     )
-    batch = res.json()
+    batch = res.json()["data"]
     all_snapshots.extend(batch)
     print(f"Fetched {len(batch)} snapshots at offset {offset}")
     if len(batch) < LIMIT:
         break
     offset += LIMIT
 
-fields = ["captureTimestamp", "bestBid", "bestAsk", "midPrice", "spread", "totalBidDepth", "totalAskDepth"]
+fields = ["timestamp", "best_bid", "best_ask", "mid_price", "spread", "bid_depth_total", "ask_depth_total"]
 with open("backtest_data.csv", "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -643,7 +641,7 @@ FROM="2026-03-25T00:00:00Z"
 TO="2026-03-26T00:00:00Z"
 
 curl -s -H "X-API-Key: rm_your_key" \
-  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&tokenSide=UP&limit=5000" | \
-  jq -r '["captureTimestamp","bestBid","bestAsk","midPrice","spread","totalBidDepth","totalAskDepth"], (.[] | [.captureTimestamp,.bestBid,.bestAsk,.midPrice,.spread,.totalBidDepth,.totalAskDepth]) | @csv' \
+  "https://api.resolvedmarkets.com/v1/markets/YOUR_MARKET_ID/snapshots?from=$FROM&to=$TO&side=UP&order=asc&limit=5000" | \
+  jq -r '["timestamp","best_bid","best_ask","mid_price","spread","bid_depth_total","ask_depth_total"], (.data[] | [.timestamp,.best_bid,.best_ask,.mid_price,.spread,.bid_depth_total,.ask_depth_total]) | @csv' \
   > backtest_data.csv
 ```

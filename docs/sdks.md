@@ -17,50 +17,74 @@ npm install ws
 ### REST Client
 
 ```typescript
-import type { RequestInit } from "node:https";
-
 interface Market {
   conditionId: string;
   slug: string;
   question: string;
   category: string;
-  tokens: { tokenId: string; side: "UP" | "DOWN" }[];
+  timeframe: string;
+  tokenIds: string[];
+  endDate: string;
+  status: "upcoming" | "live" | "settling" | "expired";
 }
 
-interface Orderbook {
+interface Level {
+  price: number;
+  size: number;
+}
+
+interface BookSide {
   tokenId: string;
-  tokenSide: "UP" | "DOWN";
-  bids: { price: number; size: number }[];
-  asks: { price: number; size: number }[];
+  bids: Level[];
+  asks: Level[];
   bestBid: number;
   bestAsk: number;
   midPrice: number;
   spread: number;
+  bidDepth: number;
+  askDepth: number;
+  timestamp: number;
 }
 
 interface MarketOrderbook {
-  marketId: string;
-  UP: Orderbook;
-  DOWN: Orderbook;
+  market_id: string;
+  question: string;
+  up: BookSide | null;
+  down: BookSide | null;
 }
 
-interface Snapshot {
-  tokenId: string;
-  tokenSide: "UP" | "DOWN";
-  bids: { price: number; size: number }[];
-  asks: { price: number; size: number }[];
-  bestBid: number;
-  bestAsk: number;
-  midPrice: number;
-  spread: number;
+interface SnapshotRow {
   timestamp: string;
+  token_side: "UP" | "DOWN";
+  best_bid: number;
+  best_ask: number;
+  mid_price: number;
+  spread: number;
+  bid_depth_total: number;
+  ask_depth_total: number;
+}
+
+interface SnapshotPage {
+  market_id: string;
+  total: number;
+  limit: number;
+  offset: number;
+  data: SnapshotRow[];
+}
+
+interface MarketBySlug {
+  market_id: string;
+  slug: string;
+  question: string;
+  token_ids: string[];
+  end_date: string | null;
+  active: boolean;
 }
 
 interface PublicStats {
-  snapshotCount: number;
-  activeMarkets: number;
-  cryptoPrices: Record<string, number>;
-  timestamp: string;
+  snapshot_count: string;
+  active_markets: number;
+  prices: Record<string, number>;
 }
 
 class ResolvedMarketsClient {
@@ -72,14 +96,9 @@ class ResolvedMarketsClient {
     this.apiKey = apiKey;
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async request<T>(path: string): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        "X-API-Key": this.apiKey,
-        "Content-Type": "application/json",
-        ...init?.headers,
-      },
+      headers: { "X-API-Key": this.apiKey },
     });
 
     if (!res.ok) {
@@ -90,15 +109,14 @@ class ResolvedMarketsClient {
     return res.json() as Promise<T>;
   }
 
-  // Public (no key required)
   async getPublicStats(): Promise<PublicStats> {
     const res = await fetch(`${this.baseUrl}/v1/public-stats`);
     return res.json() as Promise<PublicStats>;
   }
 
-  // Authenticated endpoints
-  async listMarkets(): Promise<{ markets: Market[] }> {
-    return this.request("/v1/markets/live");
+  async listMarkets(filters: Record<string, string> = {}): Promise<Market[]> {
+    const qs = new URLSearchParams(filters).toString();
+    return this.request(`/v1/markets/live${qs ? `?${qs}` : ""}`);
   }
 
   async getOrderbook(marketId: string): Promise<MarketOrderbook> {
@@ -107,11 +125,12 @@ class ResolvedMarketsClient {
 
   async getSnapshots(
     marketId: string,
-    params?: { limit?: number; offset?: number }
-  ): Promise<{ snapshots: Snapshot[] }> {
+    params?: { limit?: number; offset?: number; side?: "UP" | "DOWN" }
+  ): Promise<SnapshotPage> {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.offset) qs.set("offset", String(params.offset));
+    if (params?.side) qs.set("side", params.side);
     const query = qs.toString() ? `?${qs}` : "";
     return this.request(`/v1/markets/${marketId}/snapshots${query}`);
   }
@@ -120,18 +139,23 @@ class ResolvedMarketsClient {
     return this.request(`/v1/markets/${marketId}/summary`);
   }
 
-  async getMarketBySlug(slug: string): Promise<Market> {
+  async getMarketBySlug(slug: string): Promise<MarketBySlug> {
     return this.request(`/v1/markets/by-slug/${slug}`);
   }
 }
 
-// Usage
 const client = new ResolvedMarketsClient(process.env.RM_API_KEY!);
 
-const { markets } = await client.listMarkets();
-for (const market of markets) {
+const markets = await client.listMarkets({ crypto: "BTC", timeframe: "5m" });
+const live = markets.filter((m) => m.status === "live");
+for (const market of live) {
   const book = await client.getOrderbook(market.conditionId);
-  console.log(`${market.slug}: spread=${book.UP.spread}`);
+  console.log(`${market.slug}: spread=${book.up?.spread}`);
+}
+
+if (live.length > 0) {
+  const page = await client.getSnapshots(live[0].conditionId, { limit: 100, side: "UP" });
+  console.log(`${page.total} snapshots; newest mid ${page.data[0]?.mid_price}`);
 }
 ```
 
@@ -264,6 +288,7 @@ from __future__ import annotations
 
 import requests
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -273,9 +298,9 @@ class ResolvedMarketsClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {"X-API-Key": self.api_key, "Content-Type": "application/json"}
+        return {"X-API-Key": self.api_key}
 
-    def _get(self, path: str, params: dict | None = None) -> dict:
+    def _get(self, path: str, params: dict | None = None) -> Any:
         resp = requests.get(
             f"{self.base_url}{path}", headers=self._headers, params=params, timeout=10
         )
@@ -288,19 +313,19 @@ class ResolvedMarketsClient:
         resp.raise_for_status()
         return resp.json()
 
-    def list_markets(self) -> list[dict]:
-        return self._get("/v1/markets/live")["markets"]
+    def list_markets(self, **filters: str) -> list[dict]:
+        return self._get("/v1/markets/live", params=filters)
 
     def get_orderbook(self, market_id: str) -> dict:
         return self._get(f"/v1/markets/{market_id}/orderbook")
 
     def get_snapshots(
-        self, market_id: str, *, limit: int = 100, offset: int = 0
+        self, market_id: str, *, limit: int = 500, offset: int = 0
     ) -> list[dict]:
         return self._get(
             f"/v1/markets/{market_id}/snapshots",
             params={"limit": limit, "offset": offset},
-        )["snapshots"]
+        )["data"]
 
     def get_market_summary(self, market_id: str) -> dict:
         return self._get(f"/v1/markets/{market_id}/summary")
@@ -309,15 +334,16 @@ class ResolvedMarketsClient:
         return self._get(f"/v1/markets/by-slug/{slug}")
 
 
-# Usage
 import os
 
 client = ResolvedMarketsClient(api_key=os.environ["RM_API_KEY"])
 
-markets = client.list_markets()
-for m in markets:
+for m in client.list_markets(crypto="BTC", timeframe="5m"):
+    if m["status"] != "live":
+        continue
     book = client.get_orderbook(m["conditionId"])
-    print(f"{m['slug']}: spread={book['UP']['spread']}")
+    if book["up"]:
+        print(f"{m['slug']}: spread={book['up']['spread']}")
 ```
 
 ### Async WebSocket Streaming
@@ -417,6 +443,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -437,10 +464,14 @@ func NewClient(apiKey string) *Client {
 }
 
 type Market struct {
-	ConditionID string  `json:"conditionId"`
-	Slug        string  `json:"slug"`
-	Question    string  `json:"question"`
-	Category    string  `json:"category"`
+	ConditionID string   `json:"conditionId"`
+	Slug        string   `json:"slug"`
+	Question    string   `json:"question"`
+	Category    string   `json:"category"`
+	Timeframe   string   `json:"timeframe"`
+	TokenIDs    []string `json:"tokenIds"`
+	EndDate     string   `json:"endDate"`
+	Status      string   `json:"status"`
 }
 
 type OrderLevel struct {
@@ -448,21 +479,11 @@ type OrderLevel struct {
 	Size  float64 `json:"size"`
 }
 
-type Orderbook struct {
-	TokenID   string       `json:"tokenId"`
-	TokenSide string       `json:"tokenSide"`
-	Bids      []OrderLevel `json:"bids"`
-	Asks      []OrderLevel `json:"asks"`
-	BestBid   float64      `json:"bestBid"`
-	BestAsk   float64      `json:"bestAsk"`
-	MidPrice  float64      `json:"midPrice"`
-	Spread    float64      `json:"spread"`
-}
-
 type MarketOrderbook struct {
-	MarketID string    `json:"marketId"`
-	UP       Orderbook `json:"UP"`
-	DOWN     Orderbook `json:"DOWN"`
+	MarketID string    `json:"market_id"`
+	Question string    `json:"question"`
+	Up       *BookSide `json:"up"`
+	Down     *BookSide `json:"down"`
 }
 
 func (c *Client) doGet(path string, result interface{}) error {
@@ -471,7 +492,6 @@ func (c *Client) doGet(path string, result interface{}) error {
 		return err
 	}
 	req.Header.Set("X-API-Key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -487,14 +507,16 @@ func (c *Client) doGet(path string, result interface{}) error {
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
-func (c *Client) ListMarkets() ([]Market, error) {
-	var resp struct {
-		Markets []Market `json:"markets"`
+func (c *Client) ListMarkets(filters url.Values) ([]Market, error) {
+	path := "/v1/markets/live"
+	if len(filters) > 0 {
+		path += "?" + filters.Encode()
 	}
-	if err := c.doGet("/v1/markets/live", &resp); err != nil {
+	var markets []Market
+	if err := c.doGet(path, &markets); err != nil {
 		return nil, err
 	}
-	return resp.Markets, nil
+	return markets, nil
 }
 
 func (c *Client) GetOrderbook(marketID string) (*MarketOrderbook, error) {
@@ -633,6 +655,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 
 	rm "your-module/resolvedmarkets"
@@ -641,17 +664,21 @@ import (
 func main() {
 	client := rm.NewClient(os.Getenv("RM_API_KEY"))
 
-	// REST
-	markets, err := client.ListMarkets()
+	markets, err := client.ListMarkets(url.Values{"crypto": {"BTC"}, "timeframe": {"5m"}})
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, m := range markets {
-		book, _ := client.GetOrderbook(m.ConditionID)
-		fmt.Printf("%s: spread=%.4f\n", m.Slug, book.UP.Spread)
+		if m.Status != "live" {
+			continue
+		}
+		book, err := client.GetOrderbook(m.ConditionID)
+		if err != nil || book.Up == nil {
+			continue
+		}
+		fmt.Printf("%s: spread=%.4f\n", m.Slug, book.Up.Spread)
 	}
 
-	// WebSocket
 	for _, crypto := range []string{"BTC", "ETH"} {
 		go rm.StreamOrderbook(os.Getenv("RM_API_KEY"), crypto, func(m rm.OrderbookMarket) {
 			if m.Up != nil {
@@ -698,12 +725,12 @@ interface Market {
 export function useMarkets(apiKey: string) {
   const { data, error, isLoading, mutate } = useSWR(
     apiKey ? "/v1/markets/live" : null,
-    (path) => apiFetch<{ markets: Market[] }>(path, apiKey),
+    (path) => apiFetch<Market[]>(path, apiKey),
     { refreshInterval: 30_000 }
   );
 
   return {
-    markets: data?.markets ?? [],
+    markets: data ?? [],
     isLoading,
     error,
     refresh: mutate,
@@ -870,14 +897,13 @@ interface Market {
 }
 
 async function getMarkets(): Promise<Market[]> {
-  const res = await fetch(`${API_BASE}/v1/markets/live`, {
+  const res = await fetch(`${API_BASE}/v1/markets/live?crypto=BTC`, {
     headers: { "X-API-Key": API_KEY },
     next: { revalidate: 30 }, // ISR: refresh every 30s
   });
 
   if (!res.ok) throw new Error(`API ${res.status}`);
-  const data = await res.json();
-  return data.markets;
+  return res.json();
 }
 
 async function getOrderbook(marketId: string) {
@@ -910,8 +936,8 @@ async function MarketCard({ market }: { market: Market }) {
     <div>
       <h2>{market.question}</h2>
       <p>Category: {market.category}</p>
-      <p>UP mid: {book.UP.midPrice} | spread: {book.UP.spread}</p>
-      <p>DOWN mid: {book.DOWN.midPrice} | spread: {book.DOWN.spread}</p>
+      <p>UP mid: {book.up?.midPrice} | spread: {book.up?.spread}</p>
+      <p>DOWN mid: {book.down?.midPrice} | spread: {book.down?.spread}</p>
     </div>
   );
 }
@@ -935,11 +961,11 @@ export default async function StatsPage() {
   return (
     <div>
       <h1>Platform Stats</h1>
-      <p>Total Snapshots: {stats.snapshotCount.toLocaleString()}</p>
-      <p>Active Markets: {stats.activeMarkets}</p>
+      <p>Total Snapshots: {Number(stats.snapshot_count).toLocaleString()}</p>
+      <p>Active Markets: {stats.active_markets}</p>
       <h2>Crypto Prices</h2>
       <ul>
-        {Object.entries(stats.cryptoPrices).map(([symbol, price]) => (
+        {Object.entries(stats.prices).map(([symbol, price]) => (
           <li key={symbol}>
             {symbol}: ${(price as number).toLocaleString()}
           </li>
