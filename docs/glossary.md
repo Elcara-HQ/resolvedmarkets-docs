@@ -29,7 +29,7 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **credit** | Unit of API consumption. Simple queries cost 1 credit, a snapshot at a timestamp or a market summary costs 3, a page of time-series costs 5. Every tier is metered: Free has 5,000 credits a month. |
 | **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
 | **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
-| **market category** | Classification of tracked markets: crypto, equities (SPX), social (Elon tweets), sports (NBA/NFL/EPL), economics (FOMC/NFP), weather (temperatures/hurricanes). |
+| **market category** | Classification of tracked markets: crypto, equities (stock indices, stocks, earnings, commodities, forex and more), social (Elon tweets), sports (NBA, NFL, EPL, FIFA World Cup, tennis), economics (FOMC/NFP), weather (temperatures/hurricanes). |
 | **timeframe** | Duration window for a market. Crypto up/down: 5m, 15m, 1h, 4h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |
 | **NOWPayments** | Crypto payment gateway for tier upgrades and credit packs. Supports 200+ cryptocurrencies. |

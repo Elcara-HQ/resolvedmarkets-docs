@@ -137,28 +137,38 @@ for (const market of markets) {
 
 ### WebSocket Streaming with Reconnect
 
+Each connection follows one coin, so `connectOrderbook` opens one connection for one coin. Call it once for each coin, up to your plan's connection limit. The server sends an `orderbook` message every 2 seconds.
+
 ```typescript
 import WebSocket from "ws";
 
 type Crypto = "BTC" | "ETH" | "SOL" | "XRP" | "DOGE" | "HYPE" | "BNB";
 
-interface SnapshotMessage {
-  type: "snapshot";
-  crypto: Crypto;
-  tokenSide: "UP" | "DOWN";
+interface BookSide {
+  tokenId: string;
   bids: { price: number; size: number }[];
   asks: { price: number; size: number }[];
   bestBid: number;
   bestAsk: number;
   midPrice: number;
   spread: number;
-  timestamp: string;
+  timestamp: number;
+}
+
+interface OrderbookMarket {
+  marketId: string;
+  crypto: Crypto;
+  timeframe: string;
+  question: string;
+  cryptoPrice: number;
+  up: BookSide | null;
+  down: BookSide | null;
 }
 
 function connectOrderbook(
   apiKey: string,
-  cryptos: Crypto[],
-  onSnapshot: (snapshot: SnapshotMessage) => void
+  crypto: Crypto,
+  onMarket: (market: OrderbookMarket) => void
 ): { close: () => void } {
   const WS_URL = "wss://api.resolvedmarkets.com/ws/orderbook";
   let ws: WebSocket;
@@ -177,9 +187,7 @@ function connectOrderbook(
       const msg = JSON.parse(raw.toString());
 
       if (msg.type === "auth" && msg.status === "ok") {
-        for (const crypto of cryptos) {
-          ws.send(JSON.stringify({ type: "subscribe", crypto }));
-        }
+        ws.send(JSON.stringify({ type: "subscribe", crypto }));
         return;
       }
 
@@ -190,8 +198,10 @@ function connectOrderbook(
         return;
       }
 
-      if (msg.type === "snapshot") {
-        onSnapshot(msg as SnapshotMessage);
+      if (msg.type === "orderbook") {
+        for (const market of msg.markets as OrderbookMarket[]) {
+          onMarket(market);
+        }
       }
     });
 
@@ -222,19 +232,19 @@ function connectOrderbook(
 }
 
 // Usage
-const stream = connectOrderbook(
-  process.env.RM_API_KEY!,
-  ["BTC", "ETH"],
-  (snapshot) => {
+const cryptos: Crypto[] = ["BTC", "ETH"];
+const streams = cryptos.map((crypto) =>
+  connectOrderbook(process.env.RM_API_KEY!, crypto, (market) => {
+    if (!market.up) return;
     console.log(
-      `${snapshot.crypto} ${snapshot.tokenSide}: ` +
-      `mid=${snapshot.midPrice} spread=${snapshot.spread}`
+      `${market.crypto} ${market.timeframe} UP: ` +
+      `mid=${market.up.midPrice} spread=${market.up.spread}`
     );
-  }
+  })
 );
 
 // Graceful shutdown
-process.on("SIGINT", () => stream.close());
+process.on("SIGINT", () => streams.forEach((stream) => stream.close()));
 ```
 
 ---
@@ -312,6 +322,8 @@ for m in markets:
 
 ### Async WebSocket Streaming
 
+Each connection follows one coin, so the example runs one `stream_orderbook` for each coin. `max_size=None` lets the first `markets` message through: it can be larger than the 1 MiB default limit of `websockets`.
+
 ```python
 import asyncio
 import json
@@ -322,8 +334,8 @@ from websockets.exceptions import ConnectionClosed
 
 async def stream_orderbook(
     api_key: str,
-    cryptos: list[str],
-    on_snapshot,
+    crypto: str,
+    on_market,
     *,
     reconnect: bool = True,
 ):
@@ -332,7 +344,7 @@ async def stream_orderbook(
 
     while True:
         try:
-            async with websockets.connect(url) as ws:
+            async with websockets.connect(url, max_size=None) as ws:
                 delay = 1.0
                 await ws.send(json.dumps({"type": "auth", "apiKey": api_key}))
 
@@ -340,13 +352,13 @@ async def stream_orderbook(
                 if auth.get("status") != "ok":
                     raise RuntimeError(f"Auth failed: {auth}")
 
-                for crypto in cryptos:
-                    await ws.send(json.dumps({"type": "subscribe", "crypto": crypto}))
+                await ws.send(json.dumps({"type": "subscribe", "crypto": crypto}))
 
                 async for raw in ws:
                     msg = json.loads(raw)
-                    if msg.get("type") == "snapshot":
-                        await on_snapshot(msg)
+                    if msg.get("type") == "orderbook":
+                        for market in msg["markets"]:
+                            await on_market(market)
 
         except ConnectionClosed as e:
             if e.code == 4001:
@@ -366,20 +378,23 @@ async def stream_orderbook(
 
 
 # Usage
-async def handle_snapshot(snapshot: dict):
-    print(
-        f"{snapshot['crypto']} {snapshot['tokenSide']}: "
-        f"mid={snapshot['midPrice']} spread={snapshot['spread']}"
+async def handle_market(market: dict):
+    up = market["up"]
+    if up:
+        print(
+            f"{market['crypto']} {market['timeframe']} UP: "
+            f"mid={up['midPrice']} spread={up['spread']}"
+        )
+
+
+async def main():
+    api_key = os.environ["RM_API_KEY"]
+    await asyncio.gather(
+        *(stream_orderbook(api_key, crypto, handle_market) for crypto in ["BTC", "ETH"])
     )
 
 
-asyncio.run(
-    stream_orderbook(
-        api_key=os.environ["RM_API_KEY"],
-        cryptos=["BTC", "ETH"],
-        on_snapshot=handle_snapshot,
-    )
-)
+asyncio.run(main())
 ```
 
 ---
@@ -501,6 +516,8 @@ func (c *Client) GetMarketSummary(marketID string) (map[string]interface{}, erro
 
 ### WebSocket Streaming
 
+Each connection follows one coin. `StreamOrderbook` keeps one connection for one coin; run it once for each coin.
+
 ```go
 package resolvedmarkets
 
@@ -514,25 +531,33 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type Snapshot struct {
-	Type      string       `json:"type"`
-	Crypto    string       `json:"crypto"`
-	TokenSide string       `json:"tokenSide"`
+type BookSide struct {
+	TokenID   string       `json:"tokenId"`
 	Bids      []OrderLevel `json:"bids"`
 	Asks      []OrderLevel `json:"asks"`
 	BestBid   float64      `json:"bestBid"`
 	BestAsk   float64      `json:"bestAsk"`
 	MidPrice  float64      `json:"midPrice"`
 	Spread    float64      `json:"spread"`
-	Timestamp string       `json:"timestamp"`
+	Timestamp int64        `json:"timestamp"`
 }
 
-func StreamOrderbook(apiKey string, cryptos []string, onSnapshot func(Snapshot)) error {
+type OrderbookMarket struct {
+	MarketID    string    `json:"marketId"`
+	Crypto      string    `json:"crypto"`
+	Timeframe   string    `json:"timeframe"`
+	Question    string    `json:"question"`
+	CryptoPrice float64   `json:"cryptoPrice"`
+	Up          *BookSide `json:"up"`
+	Down        *BookSide `json:"down"`
+}
+
+func StreamOrderbook(apiKey, crypto string, onMarket func(OrderbookMarket)) error {
 	url := "wss://api.resolvedmarkets.com/ws/orderbook"
 	delay := time.Second
 
 	for {
-		err := connectAndStream(url, apiKey, cryptos, onSnapshot)
+		err := connectAndStream(url, apiKey, crypto, onMarket)
 		if err != nil {
 			log.Printf("Disconnected: %v, reconnecting in %v", err, delay)
 			time.Sleep(delay)
@@ -543,7 +568,7 @@ func StreamOrderbook(apiKey string, cryptos []string, onSnapshot func(Snapshot))
 	}
 }
 
-func connectAndStream(url, apiKey string, cryptos []string, onSnapshot func(Snapshot)) error {
+func connectAndStream(url, apiKey, crypto string, onMarket func(OrderbookMarket)) error {
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
@@ -565,11 +590,9 @@ func connectAndStream(url, apiKey string, cryptos []string, onSnapshot func(Snap
 	}
 
 	// Subscribe
-	for _, crypto := range cryptos {
-		sub := map[string]string{"type": "subscribe", "crypto": crypto}
-		if err := conn.WriteJSON(sub); err != nil {
-			return fmt.Errorf("subscribe: %w", err)
-		}
+	sub := map[string]string{"type": "subscribe", "crypto": crypto}
+	if err := conn.WriteJSON(sub); err != nil {
+		return fmt.Errorf("subscribe: %w", err)
 	}
 
 	// Read loop
@@ -586,13 +609,17 @@ func connectAndStream(url, apiKey string, cryptos []string, onSnapshot func(Snap
 			continue
 		}
 
-		if msg.Type == "snapshot" {
-			var snap Snapshot
-			if err := json.Unmarshal(raw, &snap); err != nil {
-				log.Printf("decode snapshot: %v", err)
+		if msg.Type == "orderbook" {
+			var book struct {
+				Markets []OrderbookMarket `json:"markets"`
+			}
+			if err := json.Unmarshal(raw, &book); err != nil {
+				log.Printf("decode orderbook: %v", err)
 				continue
 			}
-			onSnapshot(snap)
+			for _, m := range book.Markets {
+				onMarket(m)
+			}
 		}
 	}
 }
@@ -625,9 +652,14 @@ func main() {
 	}
 
 	// WebSocket
-	rm.StreamOrderbook(os.Getenv("RM_API_KEY"), []string{"BTC", "ETH"}, func(s rm.Snapshot) {
-		fmt.Printf("%s %s: mid=%.4f spread=%.4f\n", s.Crypto, s.TokenSide, s.MidPrice, s.Spread)
-	})
+	for _, crypto := range []string{"BTC", "ETH"} {
+		go rm.StreamOrderbook(os.Getenv("RM_API_KEY"), crypto, func(m rm.OrderbookMarket) {
+			if m.Up != nil {
+				fmt.Printf("%s %s UP: mid=%.4f spread=%.4f\n", m.Crypto, m.Timeframe, m.Up.MidPrice, m.Up.Spread)
+			}
+		})
+	}
+	select {}
 }
 ```
 
@@ -681,33 +713,44 @@ export function useMarkets(apiKey: string) {
 
 ### useOrderbook Hook (WebSocket)
 
+Each hook call opens one connection for one coin. To show several coins, call the hook once for each coin, up to your plan's connection limit.
+
 ```tsx
 import { useEffect, useRef, useState, useCallback } from "react";
 
 type Crypto = "BTC" | "ETH" | "SOL" | "XRP" | "DOGE" | "HYPE" | "BNB";
 
-interface OrderbookState {
+interface BookSide {
+  tokenId: string;
   bids: { price: number; size: number }[];
   asks: { price: number; size: number }[];
   bestBid: number;
   bestAsk: number;
   midPrice: number;
   spread: number;
-  tokenSide: string;
-  timestamp: string;
+  timestamp: number;
+}
+
+interface OrderbookMarket {
+  marketId: string;
+  crypto: Crypto;
+  timeframe: string;
+  question: string;
+  up: BookSide | null;
+  down: BookSide | null;
 }
 
 interface UseOrderbookReturn {
-  snapshots: Record<string, OrderbookState>;
+  markets: OrderbookMarket[];
   connected: boolean;
   error: string | null;
 }
 
 export function useOrderbook(
   apiKey: string,
-  cryptos: Crypto[]
+  crypto: Crypto
 ): UseOrderbookReturn {
-  const [snapshots, setSnapshots] = useState<Record<string, OrderbookState>>({});
+  const [markets, setMarkets] = useState<OrderbookMarket[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -730,18 +773,15 @@ export function useOrderbook(
           setConnected(true);
           setError(null);
           delayRef.current = 1000;
-          for (const crypto of cryptos) {
-            ws.send(JSON.stringify({ type: "subscribe", crypto }));
-          }
+          ws.send(JSON.stringify({ type: "subscribe", crypto }));
         } else {
           setError("Authentication failed");
         }
         return;
       }
 
-      if (msg.type === "snapshot") {
-        const key = `${msg.crypto}-${msg.tokenSide}`;
-        setSnapshots((prev) => ({ ...prev, [key]: msg }));
+      if (msg.type === "orderbook") {
+        setMarkets(msg.markets);
       }
     };
 
@@ -758,7 +798,7 @@ export function useOrderbook(
     };
 
     ws.onerror = () => setError("Connection error");
-  }, [apiKey, cryptos]);
+  }, [apiKey, crypto]);
 
   useEffect(() => {
     if (!apiKey) return;
@@ -770,7 +810,7 @@ export function useOrderbook(
     };
   }, [apiKey, connect]);
 
-  return { snapshots, connected, error };
+  return { markets, connected, error };
 }
 ```
 
@@ -779,7 +819,7 @@ export function useOrderbook(
 ```tsx
 function OrderbookDashboard({ apiKey }: { apiKey: string }) {
   const { markets, isLoading } = useMarkets(apiKey);
-  const { snapshots, connected, error } = useOrderbook(apiKey, ["BTC", "ETH"]);
+  const { markets: books, connected, error } = useOrderbook(apiKey, "BTC");
 
   if (isLoading) return <div>Loading markets...</div>;
   if (error) return <div>Error: {error}</div>;
@@ -788,12 +828,12 @@ function OrderbookDashboard({ apiKey }: { apiKey: string }) {
     <div>
       <span>{connected ? "Live" : "Disconnected"}</span>
 
-      {Object.entries(snapshots).map(([key, book]) => (
-        <div key={key}>
-          <h3>{key}</h3>
-          <p>Mid: {book.midPrice.toFixed(4)}</p>
-          <p>Spread: {book.spread.toFixed(4)}</p>
-          <p>Best Bid: {book.bestBid} / Best Ask: {book.bestAsk}</p>
+      {books.map((book) => book.up && (
+        <div key={book.marketId}>
+          <h3>{book.crypto} {book.timeframe}</h3>
+          <p>Mid: {book.up.midPrice.toFixed(4)}</p>
+          <p>Spread: {book.up.spread.toFixed(4)}</p>
+          <p>Best Bid: {book.up.bestBid} / Best Ask: {book.up.bestAsk}</p>
         </div>
       ))}
 

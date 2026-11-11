@@ -100,57 +100,74 @@ run_backtest("0x1234abcd...", "2026-03-24T10:00:00Z", "2026-03-24T11:00:00Z")
 
 ## Liquidity Monitoring Dashboard
 
-A real-time dashboard that tracks bid/ask depth, spread trends, and liquidity imbalances across all active markets. Useful for traders who need to see at a glance where liquidity is concentrating or thinning out, and for market operators monitoring platform health.
+A live dashboard that tracks bid/ask depth, spread trends, and liquidity imbalances, updated every 2 seconds. Useful for traders who need to see at a glance where liquidity is concentrating or thinning out, and for market operators monitoring platform health.
 
-**Approach:** Connect to the WebSocket endpoint at `wss://api.resolvedmarkets.com/ws/orderbook` and subscribe to each crypto. On every snapshot event, update in-memory state and render depth bars, spread sparklines, and a bid/ask imbalance ratio. Use `GET /v1/markets/live` on page load to populate the market list.
+**Approach:** Connect to the WebSocket endpoint at `wss://api.resolvedmarkets.com/ws/orderbook` with one connection for each crypto, because each connection follows one coin. On each `orderbook` message (every 2 seconds), update in-memory state and render depth bars, spread sparklines, and a bid/ask imbalance ratio. Use `GET /v1/markets/live` on page load to populate the market list.
+
+The example opens 7 connections, one for each coin. Only Enterprise (10 connections) allows 7; on Pro (1) or Scale (5), list fewer coins in `CRYPTOS`. It shows the live 5m up/down market of each coin. A coin has several 5m markets at the same time: the live window and upcoming windows. The example reads the `endDate` of each market from the `markets` message and shows the 5m market with the earliest `endDate` in the future.
 
 ```jsx
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const API_URL = "https://api.resolvedmarkets.com";
 const WS_URL = "wss://api.resolvedmarkets.com/ws/orderbook";
 const API_KEY = "rm_your_key";
 const CRYPTOS = ["BTC", "ETH", "SOL", "XRP", "DOGE", "HYPE", "BNB"];
+const TIMEFRAME = "5m";
+
+function sideStats(side) {
+  return {
+    bestBid: side.bestBid,
+    bestAsk: side.bestAsk,
+    spread: side.spread,
+    midPrice: side.midPrice,
+    totalBidDepth: side.bids.reduce((sum, l) => sum + l.size, 0),
+    totalAskDepth: side.asks.reduce((sum, l) => sum + l.size, 0),
+    updatedAt: side.timestamp,
+  };
+}
 
 function useOrderbookStream(apiKey) {
   const [books, setBooks] = useState({});
-  const wsRef = useRef(null);
 
   useEffect(() => {
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
+    const sockets = CRYPTOS.map((crypto) => {
+      const ws = new WebSocket(WS_URL);
+      const endDates = new Map();
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "auth", apiKey }));
-    };
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", apiKey }));
+      };
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
 
-      if (msg.type === "auth" && msg.status === "ok") {
-        // Subscribe to all cryptos after successful auth
-        CRYPTOS.forEach((crypto) => {
+        if (msg.type === "auth" && msg.status === "ok") {
           ws.send(JSON.stringify({ type: "subscribe", crypto }));
-        });
-      }
+        }
 
-      if (msg.type === "snapshot") {
-        setBooks((prev) => ({
-          ...prev,
-          [`${msg.crypto}_${msg.tokenSide}`]: {
-            bestBid: msg.bestBid,
-            bestAsk: msg.bestAsk,
-            spread: msg.spread,
-            midPrice: msg.midPrice,
-            totalBidDepth: msg.bids.reduce((sum, l) => sum + l.size, 0),
-            totalAskDepth: msg.asks.reduce((sum, l) => sum + l.size, 0),
-            updatedAt: msg.timestamp,
-          },
-        }));
-      }
-    };
+        if (msg.type === "markets") {
+          for (const m of msg.data) endDates.set(m.conditionId, new Date(m.endDate).getTime());
+        }
 
-    return () => ws.close();
+        if (msg.type === "orderbook") {
+          const now = Date.now();
+          const market = msg.markets
+            .filter((m) => m.timeframe === TIMEFRAME && endDates.get(m.marketId) > now)
+            .sort((a, b) => endDates.get(a.marketId) - endDates.get(b.marketId))[0];
+          if (!market || !market.up || !market.down) return;
+          setBooks((prev) => ({
+            ...prev,
+            [`${crypto}_UP`]: sideStats(market.up),
+            [`${crypto}_DOWN`]: sideStats(market.down),
+          }));
+        }
+      };
+
+      return ws;
+    });
+
+    return () => sockets.forEach((ws) => ws.close());
   }, [apiKey]);
 
   return books;
@@ -209,9 +226,9 @@ export default function LiquidityDashboard() {
 
 ## Cross-Token Arbitrage Detection
 
-On Polymarket, every market has an UP token and a DOWN token whose prices should sum to approximately 1.00. When the sum deviates significantly (e.g., > 1.02 or < 0.98), there is a potential arbitrage opportunity: buy the underpriced side, or sell both when the sum exceeds 1.00. This use case monitors that spread in real-time.
+On Polymarket, every market has an UP token and a DOWN token whose prices should sum to approximately 1.00. When the sum deviates significantly (e.g., > 1.02 or < 0.98), there is a potential arbitrage opportunity: buy the underpriced side, or sell both when the sum exceeds 1.00. This use case monitors that spread.
 
-**Approach:** Poll `GET /v1/markets/live` to get all active markets with their current token prices. For each market, compute `UP.price + DOWN.price` and flag deviations. For higher frequency detection, use the WebSocket stream to track both token sides of the same market and alert immediately when the invariant breaks.
+**Approach:** Poll `GET /v1/markets/live` to get all active markets with their current token prices. For each market, compute `UP.price + DOWN.price` and flag deviations. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
 
 ```python
 import requests

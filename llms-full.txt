@@ -1,6 +1,6 @@
 # Resolved Markets — Full API Reference
 
-> Real-time prediction market orderbook data across crypto, sports, economics, and weather categories. Event-driven orderbook snapshots and trades from Polymarket with ClickHouse-backed historical storage. The capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook.
+> Live and historical prediction market orderbook data across crypto, equities, social, sports, economics, and weather categories. Event-driven orderbook snapshots and trades from Polymarket with ClickHouse-backed historical storage. The capture rate depends on the market category. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook.
 
 ## Authentication
 
@@ -40,9 +40,9 @@ Public statistics about the platform.
 
 ```json
 {
-  "snapshotCount": 15234567,
-  "activeMarkets": 42,
-  "cryptoPrices": {
+  "snapshot_count": "15234567",
+  "active_markets": 42,
+  "prices": {
     "BTC": 95432.50,
     "ETH": 3421.80,
     "SOL": 187.25,
@@ -51,9 +51,14 @@ Public statistics about the platform.
     "BNB": 652.30,
     "HYPE": 31.75
   },
-  "timestamp": "2026-03-24T12:00:00.000Z"
+  "exchange": {
+    "snapshots_last_5min": 462,
+    "latest_snapshot": "2026-03-24 12:00:00.123"
+  }
 }
 ```
+
+`snapshot_count` is a string, because it is a 64-bit integer. `exchange` gives the number of exchange (Hyperliquid) orderbook snapshots in the last 5 minutes and the time of the newest one.
 
 ---
 
@@ -61,15 +66,20 @@ Public statistics about the platform.
 
 ### GET /v1/categories
 
-List all available market categories.
+List the market configs, each with its category, active market count and capture interval.
 
-**Response:**
+**Response (shortened):**
 
 ```json
-{
-  "categories": ["crypto", "sports", "economics", "weather"]
-}
+[
+  { "id": "crypto-updown", "category": "crypto", "displayName": "Crypto Up/Down", "activeMarkets": 63, "captureIntervalMs": 100, "refreshIntervalMs": 30000 },
+  { "id": "tennis-atp", "category": "sports", "group": "Tennis", "displayName": "ATP Tour", "activeMarkets": 267, "captureIntervalMs": 500, "refreshIntervalMs": 60000 },
+  { "id": "fed-rates", "category": "economics", "displayName": "Fed Rates", "activeMarkets": 243, "captureIntervalMs": 2000, "refreshIntervalMs": 300000 },
+  { "id": "daily-temperature", "category": "weather", "displayName": "Daily City Temperature", "activeMarkets": 1815, "captureIntervalMs": 2000, "refreshIntervalMs": 300000 }
+]
 ```
+
+The full response has one item for each enabled market config. `group` is only on configs that have one, such as the Tennis configs. `captureIntervalMs` is the minimum time between two snapshots of one orderbook. `category` is one of: crypto, equities, social, sports, economics, weather.
 
 ### GET /v1/markets/live
 
@@ -79,7 +89,7 @@ List currently active markets.
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
-| `category` | string | No | Filter by category (crypto, sports, economics, weather) |
+| `category` | string | No | Filter by category (crypto, equities, social, sports, economics, weather) |
 
 **Response:**
 
@@ -378,7 +388,7 @@ Retrieve the last 5 snapshots across all tokens.
 
 ### Endpoint: /ws/orderbook
 
-Real-time orderbook stream via WebSocket.
+Orderbook updates for one coin on each connection, sent every 2 seconds.
 
 **Connection Flow:**
 
@@ -389,35 +399,44 @@ Real-time orderbook stream via WebSocket.
 { "type": "auth", "apiKey": "rm_your_key" }
 ```
 
-3. Receive auth confirmation:
+3. Receive auth confirmation, then a `markets` message (`{ "type": "markets", "data": [...] }`) with every market your plan can see:
 
 ```json
 { "type": "auth", "status": "ok" }
 ```
 
-4. Subscribe to a crypto:
+4. Subscribe to one crypto:
 
 ```json
 { "type": "subscribe", "crypto": "BTC" }
 ```
 
-5. Receive real-time orderbook updates:
+5. Receive one `orderbook` message at once, then one every 2 seconds. Each message holds the current books of every tracked market of the coin (fields of `up` and `down` shortened here):
 
 ```json
 {
-  "type": "snapshot",
-  "crypto": "BTC",
-  "tokenSide": "UP",
-  "tokenId": "abc123",
-  "bids": [...],
-  "asks": [...],
-  "bestBid": 0.65,
-  "bestAsk": 0.66,
-  "midPrice": 0.655,
-  "spread": 0.01,
-  "timestamp": "2026-03-24T12:00:00.123Z"
+  "type": "orderbook",
+  "markets": [
+    {
+      "marketId": "0x1234...",
+      "crypto": "BTC",
+      "timeframe": "5m",
+      "question": "Bitcoin Up or Down - March 24, 12:00PM-12:05PM ET",
+      "cryptoPrice": 87420.5,
+      "up": { "tokenId": "abc123", "timestamp": 1774353600123, "sequenceNumber": 4821, "bids": [{ "price": 0.65, "size": 1500.0 }], "asks": [{ "price": 0.66, "size": 800.0 }], "bestBid": 0.65, "bestAsk": 0.66, "midPrice": 0.655, "spread": 0.01, "bidDepth": 975.0, "askDepth": 528.0 },
+      "down": { "tokenId": "def456", "timestamp": 1774353600098, "sequenceNumber": 4790, "bids": [{ "price": 0.34, "size": 900.0 }], "asks": [{ "price": 0.35, "size": 1200.0 }], "bestBid": 0.34, "bestAsk": 0.35, "midPrice": 0.345, "spread": 0.01, "bidDepth": 306.0, "askDepth": 420.0 }
+    }
+  ]
 }
 ```
+
+`up` is the book of the first token (Up or Yes), `down` the book of the second (Down or No); a side is `null` when the server has no book for it yet. `timestamp` is the time of the last change of the book, in epoch milliseconds. `bidDepth` and `askDepth` are the sum of price × size of each side.
+
+A coin can have several up/down markets of one timeframe at the same time: the live window and upcoming windows. The `orderbook` message does not say which window is live. The live window is the up/down market of that timeframe with the earliest future `endDate` in the `markets` message, where `conditionId` is the `marketId`. Hit-price markets are strike levels of one day with the same `endDate`, so this rule does not apply to them.
+
+**One coin per connection:** a new `subscribe` message replaces the coin of the connection; it does not add a coin. The server has no `unsubscribe` message. To follow several coins, open one connection for each coin. Your plan's connection limit (Pro 1, Scale 5, Enterprise 10) is also the number of coins that you can follow at the same time.
+
+**Update interval:** 2 seconds. Each message holds the books at the time of sending, not each change between two messages. For the full capture rate, read the stored snapshots with `GET /v1/markets/:id/snapshots`. The server sends the `markets` message again when the list of markets changes (checked every 10 seconds).
 
 **Auth timeout:** 5 seconds. Connection closed with code `4001` if not authenticated.
 
@@ -631,7 +650,7 @@ X-RateLimit-Reset: 1711278060
 | `conditionId` | string | Unique market identifier (hex) |
 | `slug` | string | URL-friendly market identifier |
 | `question` | string | Human-readable market question |
-| `category` | string | One of: crypto, sports, economics, weather |
+| `category` | string | One of: crypto, equities, social, sports, economics, weather |
 | `tokens` | Token[] | UP and DOWN tokens with orderbooks |
 | `endDate` | string | Market resolution date (ISO 8601) |
 | `active` | boolean | Whether market is currently trading |
@@ -685,13 +704,23 @@ X-RateLimit-Reset: 1711278060
 
 ## Market Categories
 
+There are 6 categories: crypto, equities, social, sports, economics and weather. `GET /v1/categories` lists the market configs of each category with their live market counts.
+
 ### Crypto
 
 Prediction markets on whether BTC, ETH, SOL, XRP, DOGE, HYPE, or BNB will be above/below certain price levels at specific times. Up/down markets span 5 timeframes: 5 minutes, 15 minutes, 1 hour, 4 hours, and 1 day.
 
+### Equities
+
+Stock indices (S&P 500 and others), stocks, earnings, commodities, forex, private companies, IPOs, acquisitions, company KPIs and the prediction-market industry.
+
+### Social
+
+Elon Musk weekly tweet count ranges.
+
 ### Sports
 
-Prediction markets on game outcomes for NBA, NFL, and EPL (English Premier League) matches.
+Prediction markets on game outcomes for NBA, NFL, EPL (English Premier League), FIFA World Cup, and ATP and WTA tennis matches.
 
 ### Economics
 
@@ -702,7 +731,7 @@ Markets on macroeconomic events:
 ### Weather
 
 Environmental prediction markets:
-- **Daily temperatures** — 30 major cities worldwide
+- **Daily temperatures** — up to 53 cities worldwide. `GET /v1/markets/live?category=weather&timeframe=daily-high` (Scale and above) lists the live city markets; the `subcategory` of each market is its city.
 - **Hurricanes** — Storm path and intensity predictions
 - **Arctic** — Sea ice extent and temperature anomalies
 

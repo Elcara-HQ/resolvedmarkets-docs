@@ -19,7 +19,7 @@ X-API-Key: rm_your_key
 
 ### Market Endpoints (API key required)
 
-- `GET /v1/categories` — List all market categories with active counts
+- `GET /v1/categories` — List the market configs, each with its category, active market count and capture interval
 - `GET /v1/markets/live` — Currently active markets (`?category=social&subcategory=Elon`)
 - `GET /v1/markets/history/recent` — Recently resolved markets
 - `GET /v1/markets/history` — Full historical markets with pagination
@@ -48,6 +48,8 @@ Connect to `/ws/orderbook`, then authenticate via message:
 { "type": "subscribe", "crypto": "BTC" }
 ```
 
+Each connection follows one coin: a new `subscribe` replaces the last one. The server sends an `orderbook` message with the books of every tracked market of that coin at once, then every 2 seconds. To follow several coins, open one connection for each coin, up to your plan's connection limit.
+
 ### Billing Endpoints
 
 - `GET /v1/user/tier` — Current tier, credits, limits
@@ -66,12 +68,14 @@ Connect to `/ws/orderbook`, then authenticate via message:
 | Category | Examples |
 |----------|----------|
 | **Crypto** | BTC, ETH, SOL, XRP, DOGE, HYPE, BNB up/down prediction markets (5m, 15m, 1h, 4h, 1d) |
-| **Equities** | S&P 500 (SPX) daily open — Up or Down |
+| **Equities** | Stock indices (S&P 500 and others), stocks, earnings, commodities, forex, private companies, IPOs, acquisitions, company KPIs |
 | **Social** | Elon Musk weekly tweet count ranges (grouped, ~30 sub-markets) |
-| **Sports** | NBA, NFL, EPL match outcomes |
+| **Sports** | NBA, NFL, EPL, FIFA World Cup, ATP and WTA tennis match outcomes |
 | **Economics** | FOMC rate decisions, Non-Farm Payrolls |
-| **Weather** | Daily temperatures (30 cities), hurricanes, Arctic conditions |
+| **Weather** | Daily temperatures (up to 53 cities), hurricanes, Arctic conditions |
 | **Exchange** | Hyperliquid perpetual orderbooks (BTC, ETH, SOL, XRP, DOGE, HYPE, BNB) |
+
+Live counts: `GET /v1/categories` gives the active market count of each market config. `GET /v1/markets/live?category=weather&timeframe=daily-high` (Scale and above) lists the live city markets; the `subcategory` of each market is its city.
 
 ## Credit System
 

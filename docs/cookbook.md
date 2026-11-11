@@ -88,9 +88,9 @@ for m in res.json():
 
 ---
 
-## 3. Stream Orderbooks in Real-Time
+## 3. Stream Orderbooks Every 2 Seconds
 
-Connect via WebSocket, authenticate, subscribe to BTC, and log every update.
+Connect via WebSocket, authenticate, subscribe to BTC, and log each `orderbook` message. The server sends one every 2 seconds, with the books of every tracked BTC market. One connection follows one coin: open one connection for each coin.
 
 ### JavaScript
 
@@ -109,11 +109,14 @@ ws.on("message", (raw) => {
   if (msg.type === "auth" && msg.status === "ok") {
     console.log("Authenticated");
     ws.send(JSON.stringify({ type: "subscribe", crypto: "BTC" }));
-  } else if (msg.type === "snapshot") {
-    console.log(
-      `[${new Date().toISOString()}] ${msg.tokenSide} ` +
-      `bid=${msg.bestBid} ask=${msg.bestAsk} spread=${(msg.bestAsk - msg.bestBid).toFixed(4)}`
-    );
+  } else if (msg.type === "orderbook") {
+    for (const m of msg.markets) {
+      if (!m.up) continue;
+      console.log(
+        `[${new Date().toISOString()}] ${m.timeframe} UP ` +
+        `bid=${m.up.bestBid} ask=${m.up.bestAsk} spread=${(m.up.bestAsk - m.up.bestBid).toFixed(4)}`
+      );
+    }
   }
 });
 
@@ -135,9 +138,12 @@ def on_message(ws, raw):
     if msg.get("type") == "auth" and msg.get("status") == "ok":
         print("Authenticated")
         ws.send(json.dumps({"type": "subscribe", "crypto": "BTC"}))
-    elif msg.get("type") == "snapshot":
-        spread = msg["bestAsk"] - msg["bestBid"]
-        print(f"{msg['tokenSide']} bid={msg['bestBid']} ask={msg['bestAsk']} spread={spread:.4f}")
+    elif msg.get("type") == "orderbook":
+        for m in msg["markets"]:
+            up = m["up"]
+            if up:
+                spread = up["bestAsk"] - up["bestBid"]
+                print(f"{m['timeframe']} UP bid={up['bestBid']} ask={up['bestAsk']} spread={spread:.4f}")
 
 ws = websocket.WebSocketApp(
     "wss://api.resolvedmarkets.com/ws/orderbook",
