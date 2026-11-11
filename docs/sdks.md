@@ -165,7 +165,7 @@ main().catch(console.error);
 
 ### WebSocket Streaming with Reconnect
 
-Each connection follows one coin, so `connectOrderbook` opens one connection for one coin. Call it once for each coin, up to your plan's connection limit. The server sends an `orderbook` message every 2 seconds. The client reconnects after a network error. It stops when the server closes the connection with code 4001 (auth timeout) or 4003 (invalid key, a plan without WebSocket access, or the connection limit of the plan).
+Each connection follows one coin, so `connectOrderbook` opens one connection for one coin. Call it once for each coin, up to your plan's connection limit. The server sends an `orderbook` message every 2 seconds. The client stops when the server closes the connection with code 4003 and the reason `Invalid API key` or `Tier restriction` (a plan without WebSocket access). On 4003 `Connection limit`, it connects again after 60 seconds, because the server can count a dropped connection for up to 60 seconds. After any other close, such as a network error or 4001 (auth timeout), it reconnects with a delay that doubles up to 30 seconds.
 
 ```typescript
 import WebSocket from "ws";
@@ -204,6 +204,7 @@ function connectOrderbook(
   let reconnectDelay = 1000;
 
   function connect() {
+    if (!alive) return;
     ws = new WebSocket(WS_URL);
 
     ws.on("open", () => {
@@ -233,13 +234,15 @@ function connectOrderbook(
 
     ws.on("close", (code: number, reason: Buffer) => {
       if (!alive) return;
-      if (code === 4001 || code === 4003) {
-        console.error(`Server closed the connection (${code}, ${reason.toString()}): not reconnecting`);
+      const text = reason.toString();
+      if (code === 4003 && text !== "Connection limit") {
+        console.error(`Server refused the connection (4003, ${text}): not reconnecting`);
         alive = false;
         return;
       }
-      console.log(`Disconnected (${code}), reconnecting in ${reconnectDelay}ms...`);
-      setTimeout(connect, reconnectDelay);
+      const wait = code === 4003 ? Math.max(reconnectDelay, 60000) : reconnectDelay;
+      console.log(`Disconnected (${code}), reconnecting in ${wait}ms...`);
+      setTimeout(connect, wait);
       reconnectDelay = Math.min(reconnectDelay * 2, 30000);
     });
 
@@ -351,7 +354,7 @@ for m in client.list_markets(crypto="BTC", timeframe="5m"):
 
 ### Async WebSocket Streaming
 
-Each connection follows one coin, so the example runs one `stream_orderbook` for each coin. `max_size=None` lets the first `markets` message through: it can be larger than the 1 MiB default limit of `websockets`. On code 4001 (auth timeout) or 4003 (invalid key, a plan without WebSocket access, or the connection limit of the plan), `stream_orderbook` raises `PermissionError` and does not reconnect.
+Each connection follows one coin, so the example runs one `stream_orderbook` for each coin. `max_size=None` lets the first `markets` message through: it can be larger than the 1 MiB default limit of `websockets`. When the server closes the connection with code 4003 and the reason `Invalid API key` or `Tier restriction` (a plan without WebSocket access), `stream_orderbook` raises `RefusedError` and does not reconnect. On 4003 `Connection limit`, it connects again after 60 seconds, because the server can count a dropped connection for up to 60 seconds. After any other close, such as a network error or 4001 (auth timeout), it reconnects with a delay that doubles up to 30 seconds.
 
 ```python
 import asyncio
@@ -359,6 +362,10 @@ import json
 import os
 import websockets
 from websockets.exceptions import ConnectionClosed
+
+
+class RefusedError(Exception):
+    pass
 
 
 async def stream_orderbook(
@@ -377,31 +384,26 @@ async def stream_orderbook(
                 delay = 1.0
                 await ws.send(json.dumps({"type": "auth", "apiKey": api_key}))
 
-                auth = json.loads(await ws.recv())
-                if auth.get("code") in (4001, 4003):
-                    raise PermissionError(f"Server refused the connection ({auth['code']}): {auth.get('message')}")
-                if auth.get("status") != "ok":
-                    raise RuntimeError(f"Auth failed: {auth}")
-
-                await ws.send(json.dumps({"type": "subscribe", "crypto": crypto}))
-
                 async for raw in ws:
                     msg = json.loads(raw)
-                    if msg.get("type") == "orderbook":
+                    if msg.get("type") == "auth" and msg.get("status") == "ok":
+                        await ws.send(json.dumps({"type": "subscribe", "crypto": crypto}))
+                    elif msg.get("type") == "error":
+                        print(f"Server error {msg.get('code')}: {msg.get('message')}")
+                    elif msg.get("type") == "orderbook":
                         for market in msg["markets"]:
                             await on_market(market)
 
-        except PermissionError:
-            raise
-
         except ConnectionClosed as e:
             code = e.rcvd.code if e.rcvd else None
-            if code in (4001, 4003):
-                raise PermissionError(f"Server closed the connection ({code}): {e.rcvd.reason}") from e
+            reason = e.rcvd.reason if e.rcvd else ""
+            if code == 4003 and reason != "Connection limit":
+                raise RefusedError(f"Server refused the connection (4003, {reason})") from e
             if not reconnect:
                 raise
-            print(f"Disconnected ({code}), reconnecting in {delay}s...")
-            await asyncio.sleep(delay)
+            wait = max(delay, 60) if code == 4003 else delay
+            print(f"Disconnected ({code}), reconnecting in {wait}s...")
+            await asyncio.sleep(wait)
             delay = min(delay * 2, 30)
 
         except Exception as e:
@@ -558,7 +560,7 @@ func (c *Client) GetMarketSummary(marketID string) (map[string]interface{}, erro
 
 ### WebSocket Streaming
 
-Each connection follows one coin. `StreamOrderbook` keeps one connection for one coin; run it once for each coin. Save this code as a second file of the `resolvedmarkets` package: it uses `BookSide` and `OrderLevel` of the REST client. `StreamOrderbook` reconnects after a network error. On code 4001 (auth timeout) or 4003 (invalid key, a plan without WebSocket access, or the connection limit of the plan), it returns a `RefusedError` and does not reconnect.
+Each connection follows one coin. `StreamOrderbook` keeps one connection for one coin; run it once for each coin. Save this code as a second file of the `resolvedmarkets` package: it uses `BookSide` and `OrderLevel` of the REST client. When the server closes the connection with code 4003 and the reason `Invalid API key` or `Tier restriction` (a plan without WebSocket access), `StreamOrderbook` returns a `RefusedError` and does not reconnect. On 4003 `Connection limit`, it connects again after 60 seconds, because the server can count a dropped connection for up to 60 seconds. After any other close, such as a network error or 4001 (auth timeout), it reconnects with a delay that doubles up to 30 seconds.
 
 ```go
 package resolvedmarkets
@@ -595,7 +597,7 @@ func (e *RefusedError) Error() string {
 
 func refusal(err error) error {
 	var closeErr *websocket.CloseError
-	if errors.As(err, &closeErr) && (closeErr.Code == 4001 || closeErr.Code == 4003) {
+	if errors.As(err, &closeErr) && closeErr.Code == 4003 && closeErr.Text != "Connection limit" {
 		return &RefusedError{Code: closeErr.Code, Reason: closeErr.Text}
 	}
 	return err
@@ -612,8 +614,13 @@ func StreamOrderbook(apiKey, crypto string, onMarket func(OrderbookMarket)) erro
 			return err
 		}
 		if err != nil {
-			log.Printf("Disconnected: %v, reconnecting in %v", err, delay)
-			time.Sleep(delay)
+			wait := delay
+			var closeErr *websocket.CloseError
+			if errors.As(err, &closeErr) && closeErr.Code == 4003 {
+				wait = time.Minute
+			}
+			log.Printf("Disconnected: %v, reconnecting in %v", err, wait)
+			time.Sleep(wait)
 			delay = time.Duration(math.Min(float64(delay*2), float64(30*time.Second)))
 			continue
 		}
@@ -634,27 +641,6 @@ func connectAndStream(url, apiKey, crypto string, onMarket func(OrderbookMarket)
 		return fmt.Errorf("auth send: %w", err)
 	}
 
-	var authResp struct {
-		Status  string `json:"status"`
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	}
-	if err := conn.ReadJSON(&authResp); err != nil {
-		return fmt.Errorf("auth read: %w", refusal(err))
-	}
-	if authResp.Code == 4001 || authResp.Code == 4003 {
-		return &RefusedError{Code: authResp.Code, Reason: authResp.Message}
-	}
-	if authResp.Status != "ok" {
-		return fmt.Errorf("auth failed: %+v", authResp)
-	}
-
-	// Subscribe
-	sub := map[string]string{"type": "subscribe", "crypto": crypto}
-	if err := conn.WriteJSON(sub); err != nil {
-		return fmt.Errorf("subscribe: %w", err)
-	}
-
 	// Read loop
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -663,13 +649,26 @@ func connectAndStream(url, apiKey, crypto string, onMarket func(OrderbookMarket)
 		}
 
 		var msg struct {
-			Type string `json:"type"`
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Code    int    `json:"code"`
+			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			continue
 		}
 
-		if msg.Type == "orderbook" {
+		switch msg.Type {
+		case "auth":
+			if msg.Status == "ok" {
+				sub := map[string]string{"type": "subscribe", "crypto": crypto}
+				if err := conn.WriteJSON(sub); err != nil {
+					return fmt.Errorf("subscribe: %w", err)
+				}
+			}
+		case "error":
+			log.Printf("server error %d: %s", msg.Code, msg.Message)
+		case "orderbook":
 			var book struct {
 				Markets []OrderbookMarket `json:"markets"`
 			}
@@ -785,7 +784,7 @@ export function useMarkets(apiKey: string) {
 
 ### useOrderbook Hook (WebSocket)
 
-Each hook call opens one connection for one coin. To show several coins, call the hook once for each coin, up to your plan's connection limit. On code 4001 or 4003, the hook puts the server's message in `error` and does not reconnect.
+Each hook call opens one connection for one coin. To show several coins, call the hook once for each coin, up to your plan's connection limit. When the server closes the connection with code 4003 and the reason `Invalid API key` or `Tier restriction`, the hook puts the server's message in `error` and does not reconnect. On 4003 `Connection limit`, it connects again after 60 seconds. After any other close, it reconnects with a delay that doubles up to 30 seconds.
 
 ```tsx
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -860,14 +859,15 @@ export function useOrderbook(
 
     ws.onclose = (event) => {
       setConnected(false);
-      if (event.code === 4001 || event.code === 4003) {
-        setError((current) => current ?? `Connection refused (${event.code}): ${event.reason}`);
+      if (event.code === 4003 && event.reason !== "Connection limit") {
+        setError((current) => current ?? `Connection refused (4003): ${event.reason}`);
         return;
       }
+      const wait = event.code === 4003 ? Math.max(delayRef.current, 60000) : delayRef.current;
       reconnectRef.current = setTimeout(() => {
         delayRef.current = Math.min(delayRef.current * 2, 30000);
         connect();
-      }, delayRef.current);
+      }, wait);
     };
 
     ws.onerror = () => setError("Connection error");

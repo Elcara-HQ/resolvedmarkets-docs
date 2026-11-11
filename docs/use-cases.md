@@ -235,7 +235,7 @@ export default function LiquidityDashboard() {
 
 On Polymarket, every market has an UP token and a DOWN token whose prices should sum to approximately 1.00. When the sum deviates significantly (e.g., > 1.02 or < 0.98), there is a potential arbitrage opportunity: buy the underpriced side, or sell both when the sum exceeds 1.00. This use case monitors that spread.
 
-**Approach:** Poll `GET /v1/markets/live` to list the live markets. It returns an array of markets with no prices, so read the orderbook of each market with `GET /v1/markets/:id/orderbook`, compute `up.midPrice + down.midPrice` and flag deviations. Each orderbook request costs 1 credit and counts against your requests per minute, so filter the list (here by `category`) and poll no more often than your plan allows. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
+**Approach:** Poll `GET /v1/markets/live` to list the live markets. It returns an array of markets with no prices, so read the orderbook of each market with `GET /v1/markets/:id/orderbook`, compute `up.midPrice + down.midPrice` and flag deviations. Each orderbook request costs 1 credit and counts against your requests per minute, so filter the list (here by `category`) and poll no more often than your plan allows. The monitor waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on a network error or any other status. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
 
 ```python
 import requests
@@ -250,23 +250,33 @@ HEADERS = {"X-API-Key": API_KEY}
 DEVIATION_THRESHOLD = 0.015
 
 
+def get_json(path: str, params: dict | None = None):
+    while True:
+        try:
+            resp = requests.get(f"{API_URL}{path}", headers=HEADERS, params=params, timeout=30)
+        except requests.RequestException as e:
+            print(f"Network error on {path}: {e}")
+            return None
+        if resp.status_code == 429:
+            time.sleep(int(resp.headers.get("Retry-After", 60)))
+            continue
+        if resp.status_code in (401, 402):
+            resp.raise_for_status()
+        if not resp.ok:
+            print(f"API {resp.status_code} on {path}, skipped")
+            return None
+        return resp.json()
+
+
 def fetch_live_markets(category: str | None = None) -> list[dict]:
     params = {}
     if category:
         params["category"] = category
-    resp = requests.get(f"{API_URL}/v1/markets/live", headers=HEADERS, params=params)
-    resp.raise_for_status()
-    return resp.json()
+    return get_json("/v1/markets/live", params) or []
 
 
 def fetch_orderbook(condition_id: str) -> dict | None:
-    resp = requests.get(
-        f"{API_URL}/v1/markets/{condition_id}/orderbook",
-        headers=HEADERS,
-    )
-    if not resp.ok:
-        return None
-    return resp.json()
+    return get_json(f"/v1/markets/{condition_id}/orderbook")
 
 
 def check_arbitrage(markets: list[dict]) -> list[dict]:

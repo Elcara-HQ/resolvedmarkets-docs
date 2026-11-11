@@ -191,6 +191,8 @@ if __name__ == "__main__":
 
 Production-grade WebSocket manager that handles authentication, exponential backoff reconnection, heartbeat detection, and event-driven state changes. Each connection follows one coin (a new `subscribe` replaces the last one), so each manager holds one coin and the usage creates one manager for each coin. Each manager uses one connection of your plan's limit. The server sends an `orderbook` message with the books of every tracked market of the coin every 2 seconds.
 
+The manager stops when the server closes the connection with code 4003 and the reason `Invalid API key` or `Tier restriction` (a plan without WebSocket access). On 4003 `Connection limit`, it connects again after 60 seconds, because the server can count a dropped connection for up to 60 seconds. After any other close, such as a network error or 4001 (auth timeout), it reconnects with backoff.
+
 ### TypeScript
 
 ```typescript
@@ -342,14 +344,15 @@ class OrderbookStreamManager extends EventEmitter {
         clearTimeout(this.authTimer);
         this.authTimer = null;
       }
+      const text = reason.toString();
       if (code === 4001) {
         this.emit("error", new Error("Server closed: auth timeout (4001)"));
       }
-      if (code === 4003) {
-        this.emit("error", new Error(`Server refused the connection (4003, ${reason.toString()}): not reconnecting`));
+      if (code === 4003 && text !== "Connection limit") {
+        this.emit("error", new Error(`Server refused the connection (4003, ${text}): not reconnecting`));
         this.intentionalClose = true;
       }
-      this.handleDisconnect();
+      this.handleDisconnect(code === 4003 ? 60_000 : 0);
     });
   }
 
@@ -361,18 +364,18 @@ class OrderbookStreamManager extends EventEmitter {
     }, this.heartbeatTimeout);
   }
 
-  private handleDisconnect(): void {
+  private handleDisconnect(minDelay: number = 0): void {
     this.cleanup();
     this.setState("disconnected");
     if (!this.intentionalClose) {
-      this.scheduleReconnect();
+      this.scheduleReconnect(minDelay);
     }
   }
 
-  private scheduleReconnect(): void {
-    const delay = Math.min(
-      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempt),
-      this.maxReconnectDelay,
+  private scheduleReconnect(minDelay: number = 0): void {
+    const delay = Math.max(
+      minDelay,
+      Math.min(this.baseReconnectDelay * Math.pow(2, this.reconnectAttempt), this.maxReconnectDelay),
     );
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => {
@@ -516,8 +519,20 @@ class OrderbookStreamManager:
 
     async def _connect_loop(self) -> None:
         while not self._intentional_close:
+            min_delay = 0.0
             try:
                 await self._do_connect()
+            except websockets.ConnectionClosed as e:
+                self._set_state(ConnectionState.DISCONNECTED)
+                code = e.rcvd.code if e.rcvd else None
+                reason = e.rcvd.reason if e.rcvd else ""
+                if code == 4003 and reason != "Connection limit":
+                    self._emit_error(Exception(f"Server refused the connection (4003, {reason}): not reconnecting"))
+                    self._intentional_close = True
+                    break
+                self._emit_error(e)
+                if code == 4003:
+                    min_delay = 60.0
             except Exception as e:
                 self._emit_error(e)
                 self._set_state(ConnectionState.DISCONNECTED)
@@ -525,9 +540,9 @@ class OrderbookStreamManager:
             if self._intentional_close:
                 break
 
-            delay = min(
-                self.base_delay * (2 ** self._reconnect_attempt),
-                self.max_delay,
+            delay = max(
+                min_delay,
+                min(self.base_delay * (2 ** self._reconnect_attempt), self.max_delay),
             )
             self._reconnect_attempt += 1
             logger.info(f"Reconnecting in {delay:.1f}s (attempt {self._reconnect_attempt})")
@@ -551,13 +566,9 @@ class OrderbookStreamManager:
                 return
 
             auth_msg = json.loads(auth_raw)
-            if auth_msg.get("code") == 4003:
-                self._emit_error(Exception(f"Server refused the connection (4003), not reconnecting: {auth_msg.get('message')}"))
-                self._intentional_close = True
-                return
             if auth_msg.get("status") != "ok":
-                self._emit_error(Exception(f"Auth failed: {auth_msg}"))
-                self._intentional_close = True
+                self._emit_error(Exception(f"Auth failed: {auth_msg.get('message')}"))
+                await asyncio.wait_for(ws.recv(), timeout=6.0)
                 return
 
             self._set_state(ConnectionState.AUTHENTICATED)
@@ -995,6 +1006,8 @@ if __name__ == "__main__":
 
 Scan all active markets, rank them by total liquidity (bid + ask depth), and flag markets where spread is unusually wide compared to their recent average.
 
+Each scan costs 1 credit for the list, 1 credit for each orderbook and 3 credits for each summary. To scan fewer markets, add `category`, `crypto` or `timeframe` to the list request. The scanner waits for `Retry-After` on a 429 and stops on a 401 or 402. It skips a market on any other error, for example a 410 when the market ended during the scan.
+
 ### TypeScript
 
 ```typescript
@@ -1036,6 +1049,24 @@ interface LiquidityReport {
   spreadWidening: boolean;
 }
 
+class ApiStopError extends Error {}
+
+async function getJson<T>(url: string, headers: Record<string, string>): Promise<T | null> {
+  for (;;) {
+    const res = await fetch(url, { headers });
+    if (res.status === 429) {
+      const wait = Number(res.headers.get("retry-after")) || 60;
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+      continue;
+    }
+    if (res.status === 401 || res.status === 402) {
+      throw new ApiStopError(`API ${res.status}: ${await res.text()}`);
+    }
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  }
+}
+
 async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
   const headers = { "X-API-Key": apiKey };
 
@@ -1049,19 +1080,13 @@ async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
   // 2. Fetch orderbook and summary for each market
   for (const market of markets) {
     try {
-      const [obRes, sumRes] = await Promise.all([
-        fetch(`${BASE_URL}/v1/markets/${market.conditionId}/orderbook`, { headers }),
-        fetch(`${BASE_URL}/v1/markets/${market.conditionId}/summary`, { headers }),
-      ]);
-
-      if (!obRes.ok || !sumRes.ok) continue;
-
-      const obData = (await obRes.json()) as MarketOrderbook;
-      const sumData = (await sumRes.json()) as MarketSummary;
-
-      const up = obData.up;
-      const down = obData.down;
+      const obData = await getJson<MarketOrderbook>(`${BASE_URL}/v1/markets/${market.conditionId}/orderbook`, headers);
+      const up = obData?.up;
+      const down = obData?.down;
       if (!up || !down) continue;
+
+      const sumData = await getJson<MarketSummary>(`${BASE_URL}/v1/markets/${market.conditionId}/summary`, headers);
+      if (!sumData) continue;
 
       const totalDepth = up.bidDepth + up.askDepth + down.bidDepth + down.askDepth;
 
@@ -1085,6 +1110,7 @@ async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
         spreadWidening,
       });
     } catch (err) {
+      if (err instanceof ApiStopError) throw err;
       console.warn(`Skipping ${market.slug}: ${err}`);
     }
   }
@@ -1124,9 +1150,24 @@ main().catch(console.error);
 ### Python
 
 ```python
+import time
+
 import httpx
 
 BASE_URL = "https://api.resolvedmarkets.com"
+
+
+def get_json(client: httpx.Client, path: str):
+    while True:
+        resp = client.get(path)
+        if resp.status_code == 429:
+            time.sleep(int(resp.headers.get("Retry-After", 60)))
+            continue
+        if resp.status_code in (401, 402):
+            resp.raise_for_status()
+        if resp.status_code != 200:
+            return None
+        return resp.json()
 
 
 def scan_market_liquidity(api_key: str) -> list[dict]:
@@ -1140,20 +1181,14 @@ def scan_market_liquidity(api_key: str) -> list[dict]:
 
         for market in markets:
             cid = market["conditionId"]
-            try:
-                ob_resp = client.get(f"/v1/markets/{cid}/orderbook")
-                sum_resp = client.get(f"/v1/markets/{cid}/summary")
-                ob_resp.raise_for_status()
-                sum_resp.raise_for_status()
-            except httpx.HTTPStatusError:
+            ob = get_json(client, f"/v1/markets/{cid}/orderbook")
+            if not ob or not ob["up"] or not ob["down"]:
                 continue
-
-            ob = ob_resp.json()
-            summary = sum_resp.json()
+            summary = get_json(client, f"/v1/markets/{cid}/summary")
+            if summary is None:
+                continue
 
             up, down = ob["up"], ob["down"]
-            if not up or not down:
-                continue
             total_depth = up["bidDepth"] + up["askDepth"] + down["bidDepth"] + down["askDepth"]
             avg_spread = (up["spread"] + down["spread"]) / 2
             widening = summary["avg_spread"] is not None and avg_spread > summary["avg_spread"] * 2
@@ -1197,6 +1232,8 @@ if __name__ == "__main__":
 
 Complete alert system that polls orderbooks at configurable intervals, triggers alerts when spread exceeds a threshold or mid price crosses a user-defined level. Supports multiple markets and alert types.
 
+Each poll costs 1 credit for each market in the rules. At the default interval of 5 seconds, one market uses 17,280 credits a day. The system pauses for `Retry-After` on a 429 and stops on a 401 or 402. On any other error, it skips the market until the next poll.
+
 ### TypeScript (Node.js)
 
 ```typescript
@@ -1231,6 +1268,7 @@ class PriceAlertSystem {
   private previousDepths: Map<string, number> = new Map();
   private handlers: AlertHandler[] = [];
   private running: boolean = false;
+  private pausedUntil: number = 0;
 
   constructor(apiKey: string, pollIntervalMs: number = 5_000) {
     this.apiKey = apiKey;
@@ -1267,6 +1305,7 @@ class PriceAlertSystem {
   }
 
   private async poll(): Promise<void> {
+    if (Date.now() < this.pausedUntil) return;
     // Group rules by market to minimize API calls
     const marketIds = new Set(this.rules.map((r) => r.marketId));
 
@@ -1275,7 +1314,21 @@ class PriceAlertSystem {
         const res = await fetch(`${BASE_URL}/v1/markets/${marketId}/orderbook`, {
           headers: { "X-API-Key": this.apiKey },
         });
-        if (!res.ok) continue;
+        if (res.status === 429) {
+          const wait = Number(res.headers.get("retry-after")) || 60;
+          console.warn(`Rate limited, pausing for ${wait}s`);
+          this.pausedUntil = Date.now() + wait * 1000;
+          return;
+        }
+        if (res.status === 401 || res.status === 402) {
+          console.error(`API ${res.status}: ${await res.text()}, stopping`);
+          this.stop();
+          return;
+        }
+        if (!res.ok) {
+          console.warn(`API ${res.status} for ${marketId}, skipped`);
+          continue;
+        }
 
         const data = await res.json() as any;
         const marketRules = this.rules.filter((r) => r.marketId === marketId);
@@ -1739,7 +1792,7 @@ Show me the platform stats including active market count and crypto prices.
 
 ## 9. React Live Dashboard Hook
 
-Custom React hook `useOrderbookStream` for WebSocket orderbook data in React/Next.js applications. Manages connection lifecycle, typed state, and cleanup on unmount. Each hook call opens one connection for one coin, and the server sends the books of that coin every 2 seconds.
+Custom React hook `useOrderbookStream` for WebSocket orderbook data in React/Next.js applications. Manages connection lifecycle, typed state, and cleanup on unmount. Each hook call opens one connection for one coin, and the server sends the books of that coin every 2 seconds. The hook uses the close-code rule of section 2: it stops on 4003 `Invalid API key` or `Tier restriction`, waits 60 seconds after 4003 `Connection limit`, and reconnects with backoff after any other close.
 
 ### TypeScript (React)
 
@@ -1888,7 +1941,7 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
       if (!mountedRef.current) return;
       wsRef.current = null;
 
-      if (event.code === 4003) {
+      if (event.code === 4003 && event.reason !== "Connection limit") {
         setStatus("error");
         return;
       }
@@ -1901,10 +1954,11 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
 
       // Auto-reconnect with exponential backoff
       if (enabled) {
-        const delay = Math.min(
+        const backoff = Math.min(
           reconnectDelay * Math.pow(2, reconnectAttemptRef.current),
           maxReconnectDelay,
         );
+        const delay = event.code === 4003 ? Math.max(backoff, 60000) : backoff;
         reconnectAttemptRef.current++;
         setReconnectCount((c) => c + 1);
         reconnectTimerRef.current = setTimeout(connect, delay);
@@ -2030,6 +2084,8 @@ const tdStyle: React.CSSProperties = {
 
 Monitor all active prediction markets and detect when the sum of UP and DOWN token mid prices deviates from 1.00. This deviation signals a potential arbitrage opportunity. Verify that sufficient depth exists to execute the trade.
 
+Each scan costs 1 credit for the list and 1 credit for the orderbook of each listed market, and each request counts against your requests per minute. The monitor filters the list by `category` and scans every 60 seconds. It waits for `Retry-After` on a 429, stops on a 401 or 402, and skips a market on any other error. To check every 2 seconds, use the WebSocket stream of section 2.
+
 ### Python
 
 ```python
@@ -2091,10 +2147,24 @@ def calculate_executable_size(
         return min(up_book["askDepth"], down_book["askDepth"])
 
 
+def get_json(client: httpx.Client, path: str, params: Optional[dict] = None):
+    while True:
+        resp = client.get(path, params=params)
+        if resp.status_code == 429:
+            time.sleep(int(resp.headers.get("Retry-After", 60)))
+            continue
+        if resp.status_code in (401, 402):
+            resp.raise_for_status()
+        if resp.status_code != 200:
+            return None
+        return resp.json()
+
+
 def check_arbitrage(
     api_key: str,
     deviation_threshold: float = 0.02,
     min_executable_size: float = 100.0,
+    category: str = "crypto",
 ) -> list[ArbitrageSignal]:
     """Scan all active markets for arbitrage opportunities."""
     headers = {"X-API-Key": api_key}
@@ -2102,17 +2172,14 @@ def check_arbitrage(
 
     with httpx.Client(base_url=BASE_URL, headers=headers, timeout=30) as client:
         # Get all active markets
-        resp = client.get("/v1/markets/live")
-        resp.raise_for_status()
-        markets = resp.json()
+        markets = get_json(client, "/v1/markets/live", {"category": category})
+        if markets is None:
+            raise RuntimeError("Could not list the live markets")
 
         for market in markets:
             cid = market["conditionId"]
-            try:
-                ob_resp = client.get(f"/v1/markets/{cid}/orderbook")
-                ob_resp.raise_for_status()
-                data = ob_resp.json()
-            except httpx.HTTPStatusError:
+            data = get_json(client, f"/v1/markets/{cid}/orderbook")
+            if data is None:
                 continue
 
             up = data["up"]
@@ -2165,7 +2232,7 @@ def check_arbitrage(
 
 def monitor_loop(
     api_key: str,
-    interval_seconds: float = 10.0,
+    interval_seconds: float = 60.0,
     deviation_threshold: float = 0.02,
     min_executable_size: float = 100.0,
 ) -> None:
@@ -2212,6 +2279,9 @@ def monitor_loop(
             if not signals:
                 print(f"No arbitrage opportunities detected. Scanning again in {interval_seconds}s...")
 
+        except httpx.HTTPStatusError as e:
+            print(f"Stopping: {e}")
+            return
         except Exception as e:
             print(f"Monitor error: {e}")
 
@@ -2238,7 +2308,7 @@ if __name__ == "__main__":
     # Continuous monitoring (uncomment to run):
     # monitor_loop(
     #     api_key="rm_your_key",
-    #     interval_seconds=10,
+    #     interval_seconds=60,
     #     deviation_threshold=0.015,
     #     min_executable_size=50.0,
     # )

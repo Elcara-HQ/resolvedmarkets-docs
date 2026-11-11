@@ -1291,7 +1291,19 @@
   4001,
   4003
  ],
+ "wsCloseReasons": {
+  "4001": [
+   "Auth timeout"
+  ],
+  "4003": [
+   "Connection limit",
+   "Invalid API key",
+   "Invalid ticket",
+   "Tier restriction"
+  ]
+ },
  "wsErrorCodeNumeric": true,
+ "wsHeartbeatMs": 30000,
  "wsMax": {
   "enterprise": 10,
   "free": 0,

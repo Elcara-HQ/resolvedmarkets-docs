@@ -624,6 +624,8 @@ A coin can have several up/down markets of one timeframe at the same time: the l
 
 **Auth timeout:** 5 seconds. Connection closed with code `4001` if not authenticated.
 
+**Close code 4003:** the server refuses the connection. The close reason is `Invalid API key`, `Tier restriction` (a plan without WebSocket access) or `Connection limit`. Stop on the first two. On `Connection limit`, connect again after 60 seconds: the server can count a dropped connection for up to 60 seconds.
+
 **Subscription options for crypto:** `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, `BNB`
 
 ---

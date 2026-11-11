@@ -262,11 +262,13 @@ const POLL_MS = 10_000;
 
 async function checkSpread() {
   let res;
+  let body;
   try {
     res = await fetch(
       `https://api.resolvedmarkets.com/v1/markets/${MARKET_ID}/orderbook`,
       { headers: { "X-API-Key": API_KEY } }
     );
+    body = await res.text();
   } catch (err) {
     console.error(`Network error: ${err.message}, retrying in ${POLL_MS / 1000}s`);
     return POLL_MS;
@@ -281,10 +283,10 @@ async function checkSpread() {
     return POLL_MS;
   }
   if (!res.ok) {
-    console.error(`API ${res.status}: ${await res.text()}, stopping`);
+    console.error(`API ${res.status}: ${body}, stopping`);
     return null;
   }
-  const data = await res.json();
+  const data = JSON.parse(body);
   for (const [side, book] of [["UP", data.up], ["DOWN", data.down]]) {
     if (!book) continue;
     if (book.spread > THRESHOLD) {

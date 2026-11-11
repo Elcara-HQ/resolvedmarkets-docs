@@ -93,6 +93,17 @@ MARKETS_MSG_BYTES = 4_600_000
 TF_CHANGE_DATE = "2026-07-15"
 OLD_TIMEFRAMES = {"meeting"}
 NEW_SNAPSHOT_PARAMS = ("interval", "touchsize", "count")
+TRANSIENT_REASON = "Connection limit"
+STOP_WS = re.compile(r"\breturn\b|\braise\b|\bbreak\b|\balive\s*=\s*false\b|intentionalClose\s*=\s*true\b|_intentional_close\s*=\s*True\b")
+CMP_CODE = r"(?:===?|!==?)\s*{c}\b|\b{c}\s*(?:===?|!==?)|\bin\s*\([^)]*\b{c}\b"
+BOT_RETRY = {429, 500, 502, 503, 504}
+SCANNERS = [
+    ("SKILL.md", r"^## \d+\. Multi-Market Liquidity Scanner"),
+    ("SKILL.md", r"^## \d+\. Build a Price Alert System"),
+    ("SKILL.md", r"^## \d+\. Market Arbitrage Monitor"),
+    ("docs/use-cases.md", r"^## Cross-Token Arbitrage Detection"),
+]
+SCAN_MIN_INTERVAL_S = 60
 
 
 def load_docs(root):
@@ -182,6 +193,12 @@ def build_facts(read, probe_dir):
     facts["marketKeys"] = literal_keys(ws, "payload.push({")[None]
     facts["wsErrorCodeNumeric"] = re.search(r"type: 'error', code: 4003", ws) is not None
     facts["wsCloseCodes"] = sorted({int(c) for c in re.findall(r"ws\.close\((\d+),", ws)})
+    reasons = {}
+    for code, reason in re.findall(r"ws\.close\((\d+), '([^']+)'\)", ws):
+        reasons.setdefault(code, set()).add(reason)
+    facts["wsCloseReasons"] = {c: sorted(r) for c, r in reasons.items()}
+    beat = re.search(r"const heartbeatInterval = setInterval\(.*?\n  \}, ([\d_]+)\);", ws, re.S).group(1)
+    facts["wsHeartbeatMs"] = int(beat.replace("_", ""))
     ob = read("OrderbookManager.ts")
     facts["snapshotKeys"] = literal_keys(ob, "export interface Snapshot {")[None]
     facts["levelKeys"] = literal_keys(ob, "export interface PriceLevel {")[None]
@@ -876,49 +893,199 @@ def check_review1(docs, blocks, facts, scope):
     return bad, info
 
 
+def branch_body(lines, i):
+    line = lines[i].rstrip()
+    if line.endswith("{"):
+        text = "\n".join(lines[i:])
+        start = len(line) - 1
+        depth = 0
+        for j in range(start, len(text)):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start + 1:j]
+        return text[start + 1:]
+    if line.endswith(":"):
+        indent = len(line) - len(line.lstrip())
+        out = []
+        for nxt in lines[i + 1:]:
+            if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= indent:
+                break
+            out.append(nxt)
+        return "\n".join(out)
+    return line
+
+
+def long_wait(lang, text, min_s):
+    text = re.sub(r"\b400[13]\b", "", text)
+    if lang in GO_LANGS:
+        return "time.Minute" in text or any(int(n) >= min_s for n in re.findall(r"(\d+) \* time\.Second", text))
+    nums = [float(n.replace("_", "")) for n in re.findall(r"\b\d[\d_]*(?:\.\d+)?\b", text)]
+    unit = 1 if lang in PY_LANGS else 1000
+    return any(n >= min_s * unit for n in nums)
+
+
 def check_ws_stop(blocks, facts):
     bad, seen = [], 0
     opens = re.compile(r"new WebSocket\(|websockets\.connect\(|\.Dial\(")
     again = re.compile(r"reconnect|setTimeout\(\s*connect\b", re.I)
+    reasons = facts["wsCloseReasons"].get("4003", [])
+    if TRANSIENT_REASON not in reasons:
+        return [f"wsOrderbook.ts: no 4003 close with the reason {TRANSIENT_REASON!r} (reasons: {reasons}); update the close rule"], []
+    min_s = 2 * facts["wsHeartbeatMs"] / 1000
+    cmp4003, cmp4001 = re.compile(CMP_CODE.format(c=4003)), re.compile(CMP_CODE.format(c=4001))
+    not_transient = re.compile(r"!==?\s*[\"']" + re.escape(TRANSIENT_REASON) + r"[\"']")
     for b in blocks:
         code = b["code"]
         if not (opens.search(code) and again.search(code)):
             continue
         seen += 1
-        if "4003" not in code:
-            bad.append(f"{b['file']}:{b['line']}: the client reconnects, but does not stop on close code 4003 "
-                       "(invalid key, a plan without WebSocket access, or the connection limit)")
-    info = [f"code: the server closes with {facts['wsCloseCodes']}; reconnecting clients checked: {seen}"]
+        tag = f"{b['file']}:{b['line']}"
+        lines = code.splitlines()
+        stops = waits = False
+        for i, line in enumerate(lines):
+            is4003, is4001 = cmp4003.search(line), cmp4001.search(line)
+            if not (is4003 or is4001):
+                continue
+            body = branch_body(lines, i)
+            if is4003 and not is4001 and not_transient.search(line):
+                stops = stops or bool(STOP_WS.search(body))
+                continue
+            if STOP_WS.search(body):
+                bad.append(f"{tag}: line {i + 1} stops on close code {4001 if is4001 else 4003} without a reason test: "
+                           f"4001 and 4003 {TRANSIENT_REASON!r} can go away, so reconnect")
+            if is4003 and long_wait(b["lang"], body, min_s):
+                waits = True
+        if not stops:
+            bad.append(f"{tag}: no stop on close code 4003 with a reason other than {TRANSIENT_REASON!r} "
+                       f"({', '.join(r for r in reasons if r != TRANSIENT_REASON)})")
+        if not waits:
+            bad.append(f"{tag}: no wait of at least {min_s:.0f} s before a reconnect after 4003 {TRANSIENT_REASON!r}: "
+                       f"the server counts a dropped connection for up to 2 heartbeats")
+    info = [f"code: 4003 close reasons {reasons}; heartbeat {facts['wsHeartbeatMs']} ms; reconnecting clients checked: {seen}"]
     return bad, info
+
+
+def section_lines(text, pattern):
+    lines = text.splitlines()
+    start = next((i for i, x in enumerate(lines) if re.match(pattern, x)), None)
+    if start is None:
+        return None, None, lines
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return start, end, lines
+
+
+def status_branches(code):
+    lines = code.splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*(?:\}\s*else\s+)?(?:if|elif)\b.*(?:\.status\b|status_code\b|\.ok\b)", line):
+            out.append((line, branch_body(lines, i)))
+    return out
+
+
+def bot_rule(b):
+    code, problems = b["code"], []
+    if b["lang"] in SH_LANGS:
+        arms = re.findall(r"^\s*([0-9|*]+)\)\s*\n(.*?);;", code, re.M | re.S)
+        if not arms:
+            return ["no case statement on the HTTP status"]
+        retry, waits, net, stop_all = set(), False, False, False
+        for pat, body in arms:
+            stop = re.search(r"\bbreak\b|\bexit\b", body) is not None
+            if pat == "*":
+                stop_all = stop
+                continue
+            codes = set(pat.split("|")) - {"200"}
+            if not codes or stop:
+                continue
+            net = net or "000" in codes
+            nums = {int(c) for c in codes if c != "000"}
+            retry |= nums
+            if 429 in nums and re.search(r"retry-after", body, re.I) and "sleep" in body:
+                waits = True
+    else:
+        retry, waits, stop_all = set(), False, False
+        for line, body in status_branches(code):
+            stop = re.search(r"\breturn null\b|\bbreak\b", body) is not None
+            nums = {int(n) for n in re.findall(r"\b([1-5]\d\d)\b", line)} - {200}
+            if re.search(r"!\s*res\.ok\b|\bnot\s+res\.ok\b|!=\s*200\b", line):
+                stop_all = stop_all or stop
+                continue
+            if stop:
+                continue
+            retry |= nums
+            if 429 in nums and re.search(r"retry-after", body, re.I):
+                waits = True
+        lines = code.splitlines()
+        handlers = [branch_body(lines, i) for i, x in enumerate(lines) if re.match(r"^\s*(?:\}\s*)?(?:catch\b|except\b)", x)]
+        net = any(not re.search(r"\breturn null\b|\bbreak\b|\bthrow\b|\braise\b", h) for h in handlers)
+        tries = [branch_body(lines, i) for i, x in enumerate(lines) if re.match(r"^\s*try\s*\{", x)]
+        if b["lang"] in JS_LANGS and not any(re.search(r"\bres\.(?:text|json)\(\)", t) for t in tries):
+            problems.append("reads the response body outside try: a network error during the body ends the bot")
+    if retry != BOT_RETRY:
+        problems.append(f"retries HTTP {sorted(retry)}; want exactly {sorted(BOT_RETRY)}")
+    if not waits:
+        problems.append("does not wait the Retry-After seconds on HTTP 429")
+    if not net:
+        problems.append("does not retry a network error")
+    if not stop_all:
+        problems.append("does not stop on the other statuses (such as 401 or 410)")
+    if re.search(r"\bthrow\b|raise_for_status\(\)", code):
+        problems.append("an error reply ends the bot with an exception")
+    return problems
 
 
 def check_alert_bot(docs, blocks):
     bad, seen = [], 0
-    text = docs.get("docs/cookbook.md", "")
-    lines = text.splitlines()
-    start = next((i for i, x in enumerate(lines) if re.match(r"^## \d+\. Build a Spread Alert Bot", x)), None)
+    start, end, lines = section_lines(docs.get("docs/cookbook.md", ""), r"^## \d+\. Build a Spread Alert Bot")
     if start is None:
         return ["docs/cookbook.md: no spread alert bot recipe"], []
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     intro = "\n".join(lines[start:end]).split("```")[0]
     if not ("429" in intro and "Retry-After" in intro and "410" in intro):
         bad.append(f"docs/cookbook.md:{start + 1}: the recipe does not state its retry rule (429 with Retry-After, 5xx, stop on 410)")
     for b in blocks:
         if b["file"] != "docs/cookbook.md" or not (start < b["line"] <= end):
             continue
-        code, tag = b["code"], f"docs/cookbook.md:{b['line']} ({b['lang'] or 'sh'})"
         seen += 1
-        if "429" not in code or not re.search(r"retry-after", code, re.I):
-            bad.append(f"{tag}: does not wait the Retry-After seconds on HTTP 429")
-        if not ("500" in code and "503" in code):
-            bad.append(f"{tag}: does not retry HTTP 500 to 504")
-        if re.search(r"\bthrow\b|raise_for_status\(\)", code):
-            bad.append(f"{tag}: an error reply ends the bot with an exception")
-        if not re.search(r"\bbreak\b|\breturn null\b", code):
-            bad.append(f"{tag}: never stops on an error that a retry cannot fix (such as 401 or 410)")
+        for problem in bot_rule(b):
+            bad.append(f"docs/cookbook.md:{b['line']} ({b['lang'] or 'sh'}): {problem}")
     if seen < 3:
         bad.append(f"docs/cookbook.md:{start + 1}: {seen} code blocks; want JavaScript, Python and cURL")
     return bad, [f"spread alert bot blocks checked: {seen}"]
+
+
+def check_scanners(docs, blocks):
+    bad, seen = [], 0
+    for name, pattern in SCANNERS:
+        start, end, lines = section_lines(docs.get(name, ""), pattern)
+        if start is None:
+            bad.append(f"{name}: no section {pattern!r}")
+            continue
+        intro = "\n".join(lines[start:end]).split("```")[0]
+        if "credit" not in intro:
+            bad.append(f"{name}:{start + 1}: the intro does not say what a scan or poll costs in credits")
+        for b in blocks:
+            if b["file"] != name or not (start < b["line"] <= end):
+                continue
+            if not re.search(r"\bfetch\(|\.get\(", b["code"]):
+                continue
+            seen += 1
+            tag = f"{name}:{b['line']} ({b['lang']})"
+            branches = status_branches(b["code"])
+            if not any("429" in line and re.search(r"retry-after", body, re.I) and re.search(r"sleep|setTimeout|pausedUntil", body)
+                       for line, body in branches):
+                bad.append(f"{tag}: does not wait the Retry-After seconds on HTTP 429")
+            if not any("401" in line and "402" in line and re.search(r"\braise|\bthrow\b|\.stop\(\)", body)
+                       for line, body in branches):
+                bad.append(f"{tag}: does not stop on HTTP 401 or 402 (a bad key or no credits)")
+            for m in re.finditer(r"\binterval_sec\w*\s*(?::\s*\w+\s*)?=\s*([\d.]+)", b["code"]):
+                if float(m.group(1)) < SCAN_MIN_INTERVAL_S:
+                    bad.append(f"{tag}: polls every {m.group(1)} s; each scan reads every listed market, "
+                               f"so poll every {SCAN_MIN_INTERVAL_S} s or more")
+    return bad, [f"scanner and poller blocks checked: {seen}"]
 
 
 def check_cors_params(docs, facts):
@@ -983,12 +1150,14 @@ def main():
          lambda: check_followups(docs, facts, scope)),
         ("module rules, status checks, recipe dates, history rows and limit, snapshot times, Go types",
          lambda: check_review1(docs, blocks, facts, scope)),
-        ("every reconnecting WebSocket client stops on close code 4003",
+        ("every reconnecting WebSocket client stops on 4003 except Connection limit, and waits after Connection limit",
          lambda: check_ws_stop(blocks, facts)),
-        ("the spread alert bot retries only 429, 5xx and network errors, and stops on the rest",
+        ("the spread alert bot retries exactly 429, 500, 502, 503, 504 and network errors, and stops on the rest",
          lambda: check_alert_bot(docs, blocks)),
         ("the CORS text matches the code; the snapshots tables list interval, touchsize and count",
          lambda: check_cors_params(docs, facts)),
+        ("scanners and pollers state their credit cost, wait Retry-After on 429, stop on 401 and 402, poll every 60 s or more",
+         lambda: check_scanners(docs, blocks)),
     ]
     passed = 0
     for i, (title, fn) in enumerate(checks, 1):
