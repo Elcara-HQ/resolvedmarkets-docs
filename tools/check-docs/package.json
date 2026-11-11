@@ -1,0 +1,8 @@
+{
+  "name": "resolvedmarkets-check-docs",
+  "private": true,
+  "description": "Checks the code examples and facts of the Resolved Markets docs",
+  "dependencies": {
+    "typescript": "5.9.3"
+  }
+}

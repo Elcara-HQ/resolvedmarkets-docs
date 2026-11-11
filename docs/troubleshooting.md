@@ -115,9 +115,9 @@ Valid crypto values are `BTC`, `ETH`, `SOL`, `XRP`, `DOGE`, `HYPE`, and `BNB`.
 
 **Symptom:** Browser console shows `Access-Control-Allow-Origin` errors when making fetch or XMLHttpRequest calls to the API.
 
-**Cause:** The Resolved Markets API is designed for server-to-server communication and does not set permissive CORS headers for browser-origin requests.
+**Cause:** The API allows requests from any origin. It answers the preflight request and sends `Access-Control-Allow-Origin` with the origin of your page. A response that does not come from the API, such as a network failure or the error page of a proxy, has no CORS headers. The browser reports it as a CORS error.
 
-**Fix:** Do not call the API directly from client-side JavaScript. Instead, set up a server-side proxy (e.g., a Next.js API route or Express endpoint) that forwards requests to the Resolved Markets API and returns the results to your frontend.
+**Fix:** Open the Network tab of the browser and read the status of the failed request. On HTTP 502 or 503, try again later. Do not put your API key in code that runs in a public web page: every visitor can read it. For a public site, call the API from your server (for example, a Next.js API route or an Express endpoint) and send the results to your frontend.
 
 ---
 

@@ -8,47 +8,40 @@ Practical, copy-paste code examples for the Resolved Markets prediction market o
 
 ---
 
-## 1. Retrieve Trade History for a Token ID
+## 1. Retrieve the Snapshot History of a Market
 
-Fetch paginated historical orderbook snapshots for a specific token, with time range filters and automatic pagination.
+Fetch the historical orderbook snapshots of one market and one side (`UP` or `DOWN`) in a time range, oldest first, with automatic pagination. The rows are in `data` and use snake_case keys. `from` and `to` take the UTC `Z` form, such as `2026-11-11T18:00:00Z`.
 
 ### TypeScript
 
 ```typescript
-import fetch, { Response } from "node-fetch";
-
-interface Level {
-  price: number;
-  size: number;
-}
-
-interface Snapshot {
-  tokenId: string;
-  tokenSide: "UP" | "DOWN";
-  bids: Level[];
-  asks: Level[];
-  bestBid: number;
-  bestAsk: number;
-  midPrice: number;
+interface SnapshotRow {
+  timestamp: string;
+  token_side: "UP" | "DOWN";
+  best_bid: number;
+  best_ask: number;
+  mid_price: number;
   spread: number;
-  totalBidDepth: number;
-  totalAskDepth: number;
-  eventTimestamp: string;
-  captureTimestamp: string;
-  sequenceNumber: number;
+  bid_depth_total: number;
+  ask_depth_total: number;
+  crypto_price: number;
+  event_timestamp: string;
+  capture_timestamp: string;
+  sequence_number: string;
 }
 
-interface SnapshotResponse {
-  snapshots: Snapshot[];
+interface SnapshotPage {
+  market_id: string;
   total: number;
   limit: number;
   offset: number;
+  data: SnapshotRow[];
 }
 
 interface FetchSnapshotsOptions {
   apiKey: string;
   marketId: string;
-  tokenSide?: "UP" | "DOWN";
+  side?: "UP" | "DOWN";
   from?: string;
   to?: string;
   limit?: number;
@@ -57,18 +50,18 @@ interface FetchSnapshotsOptions {
 
 const BASE_URL = "https://api.resolvedmarkets.com";
 
-async function fetchAllSnapshots(options: FetchSnapshotsOptions): Promise<Snapshot[]> {
+async function fetchAllSnapshots(options: FetchSnapshotsOptions): Promise<SnapshotRow[]> {
   const {
     apiKey,
     marketId,
-    tokenSide,
+    side,
     from,
     to,
     limit = 1000,
     maxPages = 100,
   } = options;
 
-  const allSnapshots: Snapshot[] = [];
+  const allSnapshots: SnapshotRow[] = [];
   let offset = 0;
   let page = 0;
 
@@ -76,13 +69,14 @@ async function fetchAllSnapshots(options: FetchSnapshotsOptions): Promise<Snapsh
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
+      order: "asc",
     });
-    if (tokenSide) params.set("tokenSide", tokenSide);
+    if (side) params.set("side", side);
     if (from) params.set("from", from);
     if (to) params.set("to", to);
 
     const url = `${BASE_URL}/v1/markets/${marketId}/snapshots?${params}`;
-    const res: Response = await fetch(url, {
+    const res = await fetch(url, {
       headers: { "X-API-Key": apiKey },
     });
 
@@ -91,10 +85,10 @@ async function fetchAllSnapshots(options: FetchSnapshotsOptions): Promise<Snapsh
       throw new Error(`API error ${res.status}: ${body}`);
     }
 
-    const data = (await res.json()) as SnapshotResponse;
-    allSnapshots.push(...data.snapshots);
+    const result = (await res.json()) as SnapshotPage;
+    allSnapshots.push(...result.data);
 
-    if (allSnapshots.length >= data.total || data.snapshots.length < limit) {
+    if (allSnapshots.length >= result.total || result.data.length < limit) {
       break;
     }
 
@@ -107,19 +101,20 @@ async function fetchAllSnapshots(options: FetchSnapshotsOptions): Promise<Snapsh
 
 // Usage
 async function main(): Promise<void> {
+  const now = Date.now();
   const snapshots = await fetchAllSnapshots({
     apiKey: "rm_your_key",
     marketId: "0x1234abcd...",
-    tokenSide: "UP",
-    from: "2026-03-24T00:00:00Z",
-    to: "2026-03-24T12:00:00Z",
+    side: "UP",
+    from: new Date(now - 3_600_000).toISOString(),
+    to: new Date(now).toISOString(),
   });
 
   console.log(`Fetched ${snapshots.length} snapshots`);
   for (const s of snapshots) {
     console.log(
-      `seq=${s.sequenceNumber} mid=${s.midPrice} spread=${s.spread} ` +
-      `depth=${s.totalBidDepth + s.totalAskDepth} @ ${s.eventTimestamp}`
+      `seq=${s.sequence_number} mid=${s.mid_price} spread=${s.spread} ` +
+      `depth=${s.bid_depth_total + s.ask_depth_total} @ ${s.timestamp}`
     );
   }
 }
@@ -130,6 +125,7 @@ main().catch(console.error);
 ### Python
 
 ```python
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import httpx
 
@@ -139,7 +135,7 @@ BASE_URL = "https://api.resolvedmarkets.com"
 def fetch_all_snapshots(
     api_key: str,
     market_id: str,
-    token_side: Optional[str] = None,
+    side: Optional[str] = None,
     from_ts: Optional[str] = None,
     to_ts: Optional[str] = None,
     limit: int = 1000,
@@ -152,9 +148,9 @@ def fetch_all_snapshots(
 
     with httpx.Client(base_url=BASE_URL, headers=headers, timeout=30) as client:
         for _ in range(max_pages):
-            params: dict = {"limit": limit, "offset": offset}
-            if token_side:
-                params["tokenSide"] = token_side
+            params: dict = {"limit": limit, "offset": offset, "order": "asc"}
+            if side:
+                params["side"] = side
             if from_ts:
                 params["from"] = from_ts
             if to_ts:
@@ -164,8 +160,8 @@ def fetch_all_snapshots(
             resp.raise_for_status()
             data = resp.json()
 
-            all_snapshots.extend(data["snapshots"])
-            if len(all_snapshots) >= data["total"] or len(data["snapshots"]) < limit:
+            all_snapshots.extend(data["data"])
+            if len(all_snapshots) >= data["total"] or len(data["data"]) < limit:
                 break
 
             offset += limit
@@ -175,17 +171,18 @@ def fetch_all_snapshots(
 
 # Usage
 if __name__ == "__main__":
+    now = datetime.now(timezone.utc)
     snapshots = fetch_all_snapshots(
         api_key="rm_your_key",
         market_id="0x1234abcd...",
-        token_side="UP",
-        from_ts="2026-03-24T00:00:00Z",
-        to_ts="2026-03-24T12:00:00Z",
+        side="UP",
+        from_ts=(now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        to_ts=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
 
     print(f"Fetched {len(snapshots)} snapshots")
     for s in snapshots:
-        print(f"seq={s['sequenceNumber']} mid={s['midPrice']} spread={s['spread']}")
+        print(f"seq={s['sequence_number']} mid={s['mid_price']} spread={s['spread']}")
 ```
 
 ---
@@ -324,6 +321,11 @@ class OrderbookStreamManager extends EventEmitter {
         return;
       }
 
+      if (msg.type === "error") {
+        this.emit("error", new Error(`Server error ${msg.code}: ${msg.message}`));
+        return;
+      }
+
       if (msg.type === "orderbook") {
         for (const market of msg.markets as OrderbookMarket[]) {
           this.emit("orderbook", market);
@@ -342,6 +344,10 @@ class OrderbookStreamManager extends EventEmitter {
       }
       if (code === 4001) {
         this.emit("error", new Error("Server closed: auth timeout (4001)"));
+      }
+      if (code === 4003) {
+        this.emit("error", new Error(`Server refused the connection (4003, ${reason.toString()}): not reconnecting`));
+        this.intentionalClose = true;
       }
       this.handleDisconnect();
     });
@@ -545,6 +551,10 @@ class OrderbookStreamManager:
                 return
 
             auth_msg = json.loads(auth_raw)
+            if auth_msg.get("code") == 4003:
+                self._emit_error(Exception(f"Server refused the connection (4003), not reconnecting: {auth_msg.get('message')}"))
+                self._intentional_close = True
+                return
             if auth_msg.get("status") != "ok":
                 self._emit_error(Exception(f"Auth failed: {auth_msg}"))
                 self._intentional_close = True
@@ -631,19 +641,15 @@ interface OrderbookSide {
   bestAsk: number;
   midPrice: number;
   spread: number;
-  totalBidDepth: number;
-  totalAskDepth: number;
+  bidDepth: number;
+  askDepth: number;
 }
 
 interface OrderbookResponse {
-  market: {
-    conditionId: string;
-    tokens: {
-      UP: OrderbookSide;
-      DOWN: OrderbookSide;
-    };
-    timestamp: string;
-  };
+  market_id: string;
+  question: string;
+  up: OrderbookSide | null;
+  down: OrderbookSide | null;
 }
 
 interface OrderbookMetrics {
@@ -664,10 +670,10 @@ function calculateWeightedMidPrice(bestBid: number, bestAsk: number, bidSize: nu
   return (bestBid * askSize + bestAsk * bidSize) / totalSize;
 }
 
-function calculateOrderImbalance(totalBidDepth: number, totalAskDepth: number): number {
-  const total = totalBidDepth + totalAskDepth;
+function calculateOrderImbalance(bidDepth: number, askDepth: number): number {
+  const total = bidDepth + askDepth;
   if (total === 0) return 0;
-  return (totalBidDepth - totalAskDepth) / total;
+  return (bidDepth - askDepth) / total;
 }
 
 function calculateDepthAtLevels(levels: Level[], n: number): number[] {
@@ -705,7 +711,10 @@ async function fetchOrderbookWithMetrics(
   }
 
   const data = (await res.json()) as OrderbookResponse;
-  const orderbook = data.market.tokens[side];
+  const orderbook = side === "UP" ? data.up : data.down;
+  if (!orderbook) {
+    throw new Error(`Market ${marketId} has no ${side} book`);
+  }
 
   const topBidSize = orderbook.bids.length > 0 ? orderbook.bids[0].size : 0;
   const topAskSize = orderbook.asks.length > 0 ? orderbook.asks[0].size : 0;
@@ -714,7 +723,7 @@ async function fetchOrderbookWithMetrics(
     weightedMidPrice: calculateWeightedMidPrice(
       orderbook.bestBid, orderbook.bestAsk, topBidSize, topAskSize,
     ),
-    orderImbalance: calculateOrderImbalance(orderbook.totalBidDepth, orderbook.totalAskDepth),
+    orderImbalance: calculateOrderImbalance(orderbook.bidDepth, orderbook.askDepth),
     bidDepthAtLevels: calculateDepthAtLevels(orderbook.bids, depthLevels),
     askDepthAtLevels: calculateDepthAtLevels(orderbook.asks, depthLevels),
     bidVwap: calculateVwap(orderbook.bids),
@@ -795,7 +804,9 @@ def fetch_orderbook_with_metrics(
         resp.raise_for_status()
         data = resp.json()
 
-    book = data["market"]["tokens"][side]
+    book = data[side.lower()]
+    if book is None:
+        raise ValueError(f"Market {market_id} has no {side} book")
     top_bid_size = book["bids"][0]["size"] if book["bids"] else 0
     top_ask_size = book["asks"][0]["size"] if book["asks"] else 0
 
@@ -805,7 +816,7 @@ def fetch_orderbook_with_metrics(
             "weighted_mid_price": weighted_mid_price(
                 book["bestBid"], book["bestAsk"], top_bid_size, top_ask_size,
             ),
-            "order_imbalance": order_imbalance(book["totalBidDepth"], book["totalAskDepth"]),
+            "order_imbalance": order_imbalance(book["bidDepth"], book["askDepth"]),
             "bid_depth_at_levels": cumulative_depth(book["bids"], depth_levels),
             "ask_depth_at_levels": cumulative_depth(book["asks"], depth_levels),
             "bid_vwap": vwap(book["bids"]),
@@ -834,7 +845,7 @@ Download snapshots over a time range and compute spread statistics: average, min
 ### Python (pandas)
 
 ```python
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -849,7 +860,7 @@ def fetch_snapshots_df(
     market_id: str,
     from_ts: str,
     to_ts: str,
-    token_side: str = "UP",
+    side: str = "UP",
     limit: int = 1000,
 ) -> pd.DataFrame:
     """Download all snapshots in a time range into a DataFrame."""
@@ -864,24 +875,24 @@ def fetch_snapshots_df(
                 params={
                     "from": from_ts,
                     "to": to_ts,
-                    "tokenSide": token_side,
+                    "side": side,
+                    "order": "asc",
                     "limit": limit,
                     "offset": offset,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            rows.extend(data["snapshots"])
+            rows.extend(data["data"])
 
-            if len(rows) >= data["total"] or len(data["snapshots"]) < limit:
+            if len(rows) >= data["total"] or len(data["data"]) < limit:
                 break
             offset += limit
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["eventTimestamp"] = pd.to_datetime(df["eventTimestamp"])
-        df["captureTimestamp"] = pd.to_datetime(df["captureTimestamp"])
-        df = df.sort_values("eventTimestamp").reset_index(drop=True)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.sort_values("timestamp").reset_index(drop=True)
     return df
 
 
@@ -891,7 +902,7 @@ def analyze_spread(df: pd.DataFrame) -> dict:
         return {"error": "No data"}
 
     spread = df["spread"]
-    mid = df["midPrice"]
+    mid = df["mid_price"]
 
     # Spread in basis points relative to mid price
     spread_bps = (spread / mid) * 10_000
@@ -899,8 +910,8 @@ def analyze_spread(df: pd.DataFrame) -> dict:
     stats = {
         "count": len(df),
         "time_range": {
-            "from": str(df["eventTimestamp"].min()),
-            "to": str(df["eventTimestamp"].max()),
+            "from": str(df["timestamp"].min()),
+            "to": str(df["timestamp"].max()),
         },
         "spread": {
             "mean": float(spread.mean()),
@@ -931,12 +942,12 @@ def spread_time_series(df: pd.DataFrame, resample: str = "1min") -> pd.DataFrame
     if df.empty:
         return pd.DataFrame()
 
-    ts = df.set_index("eventTimestamp")[["spread", "midPrice"]]
+    ts = df.set_index("timestamp")[["spread", "mid_price"]]
     resampled = ts.resample(resample).agg(
         spread_mean=("spread", "mean"),
         spread_max=("spread", "max"),
         spread_min=("spread", "min"),
-        mid_price=("midPrice", "mean"),
+        mid_price=("mid_price", "mean"),
         count=("spread", "count"),
     ).dropna()
 
@@ -947,13 +958,14 @@ def spread_time_series(df: pd.DataFrame, resample: str = "1min") -> pd.DataFrame
 if __name__ == "__main__":
     api_key = "rm_your_key"
     market_id = "0x1234abcd..."
+    now = datetime.now(timezone.utc)
 
     df = fetch_snapshots_df(
         api_key=api_key,
         market_id=market_id,
-        from_ts="2026-03-24T00:00:00Z",
-        to_ts="2026-03-24T12:00:00Z",
-        token_side="UP",
+        from_ts=(now - timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        to_ts=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        side="UP",
     )
 
     print(f"Fetched {len(df)} snapshots")
@@ -993,13 +1005,21 @@ interface Market {
   slug: string;
   question: string;
   category: string;
-  tokens: {
-    tokenId: string;
-    outcome: string;
-    side: "UP" | "DOWN";
-    price: number;
-  }[];
-  active: boolean;
+}
+
+interface BookSide {
+  spread: number;
+  bidDepth: number;
+  askDepth: number;
+}
+
+interface MarketOrderbook {
+  up: BookSide | null;
+  down: BookSide | null;
+}
+
+interface MarketSummary {
+  avg_spread: number | null;
 }
 
 interface LiquidityReport {
@@ -1022,7 +1042,7 @@ async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
   // 1. Get all active markets
   const marketsRes = await fetch(`${BASE_URL}/v1/markets/live`, { headers });
   if (!marketsRes.ok) throw new Error(`Failed to list markets: ${marketsRes.status}`);
-  const { markets } = (await marketsRes.json()) as { markets: Market[] };
+  const markets = (await marketsRes.json()) as Market[];
 
   const reports: LiquidityReport[] = [];
 
@@ -1036,20 +1056,20 @@ async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
 
       if (!obRes.ok || !sumRes.ok) continue;
 
-      const obData = await obRes.json();
-      const sumData = await sumRes.json();
+      const obData = (await obRes.json()) as MarketOrderbook;
+      const sumData = (await sumRes.json()) as MarketSummary;
 
-      const up = obData.market.tokens.UP;
-      const down = obData.market.tokens.DOWN;
+      const up = obData.up;
+      const down = obData.down;
+      if (!up || !down) continue;
 
-      const totalDepth =
-        up.totalBidDepth + up.totalAskDepth + down.totalBidDepth + down.totalAskDepth;
+      const totalDepth = up.bidDepth + up.askDepth + down.bidDepth + down.askDepth;
 
       const currentAvgSpread = (up.spread + down.spread) / 2;
-      const historicalAvgSpread = sumData.summary.avgSpread;
+      const historicalAvgSpread = sumData.avg_spread;
 
       // Flag if current spread is more than 2x the historical average
-      const spreadWidening = currentAvgSpread > historicalAvgSpread * 2;
+      const spreadWidening = historicalAvgSpread !== null && currentAvgSpread > historicalAvgSpread * 2;
 
       reports.push({
         conditionId: market.conditionId,
@@ -1057,8 +1077,8 @@ async function scanMarketLiquidity(apiKey: string): Promise<LiquidityReport[]> {
         question: market.question,
         category: market.category,
         totalDepth,
-        bidDepth: up.totalBidDepth + down.totalBidDepth,
-        askDepth: up.totalAskDepth + down.totalAskDepth,
+        bidDepth: up.bidDepth + down.bidDepth,
+        askDepth: up.askDepth + down.askDepth,
         spreadUp: up.spread,
         spreadDown: down.spread,
         avgSpread: currentAvgSpread,
@@ -1116,7 +1136,7 @@ def scan_market_liquidity(api_key: str) -> list[dict]:
     with httpx.Client(base_url=BASE_URL, headers=headers, timeout=30) as client:
         markets_resp = client.get("/v1/markets/live")
         markets_resp.raise_for_status()
-        markets = markets_resp.json()["markets"]
+        markets = markets_resp.json()
 
         for market in markets:
             cid = market["conditionId"]
@@ -1128,16 +1148,15 @@ def scan_market_liquidity(api_key: str) -> list[dict]:
             except httpx.HTTPStatusError:
                 continue
 
-            ob = ob_resp.json()["market"]["tokens"]
-            summary = sum_resp.json()["summary"]
+            ob = ob_resp.json()
+            summary = sum_resp.json()
 
-            up, down = ob["UP"], ob["DOWN"]
-            total_depth = (
-                up["totalBidDepth"] + up["totalAskDepth"]
-                + down["totalBidDepth"] + down["totalAskDepth"]
-            )
+            up, down = ob["up"], ob["down"]
+            if not up or not down:
+                continue
+            total_depth = up["bidDepth"] + up["askDepth"] + down["bidDepth"] + down["askDepth"]
             avg_spread = (up["spread"] + down["spread"]) / 2
-            widening = avg_spread > summary["avgSpread"] * 2
+            widening = summary["avg_spread"] is not None and avg_spread > summary["avg_spread"] * 2
 
             reports.append({
                 "conditionId": cid,
@@ -1145,8 +1164,8 @@ def scan_market_liquidity(api_key: str) -> list[dict]:
                 "question": market["question"],
                 "category": market["category"],
                 "total_depth": total_depth,
-                "bid_depth": up["totalBidDepth"] + down["totalBidDepth"],
-                "ask_depth": up["totalAskDepth"] + down["totalAskDepth"],
+                "bid_depth": up["bidDepth"] + down["bidDepth"],
+                "ask_depth": up["askDepth"] + down["askDepth"],
                 "spread_up": up["spread"],
                 "spread_down": down["spread"],
                 "avg_spread": avg_spread,
@@ -1181,8 +1200,6 @@ Complete alert system that polls orderbooks at configurable intervals, triggers 
 ### TypeScript (Node.js)
 
 ```typescript
-import fetch from "node-fetch";
-
 const BASE_URL = "https://api.resolvedmarkets.com";
 
 type AlertType = "spread_threshold" | "price_cross_above" | "price_cross_below" | "depth_drop";
@@ -1190,7 +1207,7 @@ type AlertType = "spread_threshold" | "price_cross_above" | "price_cross_below" 
 interface AlertRule {
   id: string;
   marketId: string;
-  tokenSide: "UP" | "DOWN";
+  side: "UP" | "DOWN";
   type: AlertType;
   threshold: number;
   message?: string;
@@ -1264,7 +1281,7 @@ class PriceAlertSystem {
         const marketRules = this.rules.filter((r) => r.marketId === marketId);
 
         for (const rule of marketRules) {
-          const book = data.market.tokens[rule.tokenSide];
+          const book = rule.side === "UP" ? data.up : data.down;
           if (!book) continue;
           this.evaluateRule(rule, book);
         }
@@ -1275,7 +1292,7 @@ class PriceAlertSystem {
   }
 
   private evaluateRule(rule: AlertRule, book: any): void {
-    const key = `${rule.marketId}:${rule.tokenSide}`;
+    const key = `${rule.marketId}:${rule.side}`;
     const now = new Date().toISOString();
 
     switch (rule.type) {
@@ -1305,7 +1322,7 @@ class PriceAlertSystem {
       }
 
       case "depth_drop": {
-        const totalDepth = book.totalBidDepth + book.totalAskDepth;
+        const totalDepth = book.bidDepth + book.askDepth;
         const prevDepth = this.previousDepths.get(key);
         if (prevDepth !== undefined) {
           const dropPct = (prevDepth - totalDepth) / prevDepth;
@@ -1342,7 +1359,7 @@ const alerts = new PriceAlertSystem("rm_your_key", 5_000);
 alerts.addRule({
   id: "btc-spread",
   marketId: "0x1234abcd...",
-  tokenSide: "UP",
+  side: "UP",
   type: "spread_threshold",
   threshold: 0.03,
 });
@@ -1351,7 +1368,7 @@ alerts.addRule({
 alerts.addRule({
   id: "btc-price-above-70",
   marketId: "0x1234abcd...",
-  tokenSide: "UP",
+  side: "UP",
   type: "price_cross_above",
   threshold: 0.70,
 });
@@ -1360,7 +1377,7 @@ alerts.addRule({
 alerts.addRule({
   id: "btc-price-below-50",
   marketId: "0x1234abcd...",
-  tokenSide: "UP",
+  side: "UP",
   type: "price_cross_below",
   threshold: 0.50,
 });
@@ -1369,14 +1386,14 @@ alerts.addRule({
 alerts.addRule({
   id: "btc-depth-drop",
   marketId: "0x1234abcd...",
-  tokenSide: "UP",
+  side: "UP",
   type: "depth_drop",
   threshold: 0.30,
 });
 
 alerts.onAlert((event) => {
   console.log(
-    `[ALERT] ${event.rule.type} on ${event.rule.marketId} ${event.rule.tokenSide}\n` +
+    `[ALERT] ${event.rule.type} on ${event.rule.marketId} ${event.rule.side}\n` +
     `  Value: ${event.currentValue.toFixed(6)} | Threshold: ${event.threshold}\n` +
     `  Time: ${event.timestamp}`,
   );
@@ -1406,6 +1423,7 @@ Requirements:
   pip install httpx pandas pyarrow
 """
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -1420,7 +1438,7 @@ def download_snapshots(
     market_id: str,
     from_ts: str,
     to_ts: str,
-    token_side: str = "UP",
+    side: str = "UP",
     limit: int = 1000,
     max_records: Optional[int] = None,
 ) -> list[dict]:
@@ -1436,7 +1454,9 @@ def download_snapshots(
                 params={
                     "from": from_ts,
                     "to": to_ts,
-                    "tokenSide": token_side,
+                    "side": side,
+                    "order": "asc",
+                    "includebook": "true",
                     "limit": limit,
                     "offset": offset,
                 },
@@ -1444,14 +1464,14 @@ def download_snapshots(
             resp.raise_for_status()
             data = resp.json()
 
-            all_snapshots.extend(data["snapshots"])
+            all_snapshots.extend(data["data"])
             print(f"  Downloaded {len(all_snapshots)}/{data['total']} snapshots...")
 
             if max_records and len(all_snapshots) >= max_records:
                 all_snapshots = all_snapshots[:max_records]
                 break
 
-            if len(all_snapshots) >= data["total"] or len(data["snapshots"]) < limit:
+            if len(all_snapshots) >= data["total"] or len(data["data"]) < limit:
                 break
 
             offset += limit
@@ -1462,17 +1482,17 @@ def download_snapshots(
 def flatten_snapshot(snapshot: dict, max_levels: int = 10) -> dict:
     """Flatten a snapshot dict, expanding bid/ask arrays into columns."""
     flat: dict = {
-        "tokenId": snapshot["tokenId"],
-        "tokenSide": snapshot["tokenSide"],
-        "bestBid": snapshot["bestBid"],
-        "bestAsk": snapshot["bestAsk"],
-        "midPrice": snapshot["midPrice"],
+        "timestamp": snapshot["timestamp"],
+        "token_side": snapshot["token_side"],
+        "best_bid": snapshot["best_bid"],
+        "best_ask": snapshot["best_ask"],
+        "mid_price": snapshot["mid_price"],
         "spread": snapshot["spread"],
-        "totalBidDepth": snapshot["totalBidDepth"],
-        "totalAskDepth": snapshot["totalAskDepth"],
-        "eventTimestamp": snapshot["eventTimestamp"],
-        "captureTimestamp": snapshot["captureTimestamp"],
-        "sequenceNumber": snapshot["sequenceNumber"],
+        "bid_depth_total": snapshot["bid_depth_total"],
+        "ask_depth_total": snapshot["ask_depth_total"],
+        "event_timestamp": snapshot["event_timestamp"],
+        "capture_timestamp": snapshot["capture_timestamp"],
+        "sequence_number": snapshot["sequence_number"],
     }
 
     # Flatten bids: bid_0_price, bid_0_size, bid_1_price, ...
@@ -1501,7 +1521,7 @@ def export_to_files(
     market_id: str,
     from_ts: str,
     to_ts: str,
-    token_side: str = "UP",
+    side: str = "UP",
     output_dir: str = "./exports",
     max_levels: int = 10,
     max_records: Optional[int] = None,
@@ -1510,13 +1530,13 @@ def export_to_files(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading snapshots for {market_id} ({token_side})...")
+    print(f"Downloading snapshots for {market_id} ({side})...")
     snapshots = download_snapshots(
         api_key=api_key,
         market_id=market_id,
         from_ts=from_ts,
         to_ts=to_ts,
-        token_side=token_side,
+        side=side,
         max_records=max_records,
     )
 
@@ -1529,19 +1549,19 @@ def export_to_files(
     df = pd.DataFrame(rows)
 
     # Convert timestamps
-    df["eventTimestamp"] = pd.to_datetime(df["eventTimestamp"])
-    df["captureTimestamp"] = pd.to_datetime(df["captureTimestamp"])
+    df["event_timestamp"] = pd.to_datetime(df["event_timestamp"])
+    df["capture_timestamp"] = pd.to_datetime(df["capture_timestamp"])
 
     # Add derived columns
-    df["latencyMs"] = (df["captureTimestamp"] - df["eventTimestamp"]).dt.total_seconds() * 1000
-    df["totalDepth"] = df["totalBidDepth"] + df["totalAskDepth"]
-    df["imbalance"] = (df["totalBidDepth"] - df["totalAskDepth"]) / df["totalDepth"]
+    df["latency_ms"] = (df["capture_timestamp"] - df["event_timestamp"]).dt.total_seconds() * 1000
+    df["total_depth"] = df["bid_depth_total"] + df["ask_depth_total"]
+    df["imbalance"] = (df["bid_depth_total"] - df["ask_depth_total"]) / df["total_depth"]
 
     # Generate filenames
     safe_id = market_id[:16].replace("0x", "")
     from_date = from_ts[:10]
     to_date = to_ts[:10]
-    base_name = f"snapshots_{safe_id}_{token_side}_{from_date}_{to_date}"
+    base_name = f"snapshots_{safe_id}_{side}_{from_date}_{to_date}"
 
     csv_path = out / f"{base_name}.csv"
     parquet_path = out / f"{base_name}.parquet"
@@ -1555,20 +1575,21 @@ def export_to_files(
     print(f"Parquet: {parquet_path} ({parquet_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
     print(f"\nSchema: {len(df.columns)} columns, {len(df)} rows")
-    print(f"Time range: {df['eventTimestamp'].min()} to {df['eventTimestamp'].max()}")
-    print(f"Avg latency: {df['latencyMs'].mean():.1f}ms")
+    print(f"Time range: {df['event_timestamp'].min()} to {df['event_timestamp'].max()}")
+    print(f"Avg latency: {df['latency_ms'].mean():.1f}ms")
 
     return {"csv": str(csv_path), "parquet": str(parquet_path)}
 
 
 # Usage
 if __name__ == "__main__":
+    now = datetime.now(timezone.utc)
     paths = export_to_files(
         api_key="rm_your_key",
         market_id="0x1234abcd...",
-        from_ts="2026-03-24T00:00:00Z",
-        to_ts="2026-03-25T00:00:00Z",
-        token_side="UP",
+        from_ts=(now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        to_ts=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        side="UP",
         output_dir="./exports",
         max_levels=10,
     )
@@ -1847,6 +1868,11 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
         return;
       }
 
+      if (msg.type === "error") {
+        setError(String(msg.message));
+        return;
+      }
+
       if (msg.type === "orderbook") {
         setMarkets(msg.markets as OrderbookMarket[]);
         setLastUpdate(new Date());
@@ -1861,6 +1887,12 @@ export function useOrderbookStream(options: UseOrderbookStreamOptions): UseOrder
     ws.onclose = (event) => {
       if (!mountedRef.current) return;
       wsRef.current = null;
+
+      if (event.code === 4003) {
+        setStatus("error");
+        return;
+      }
+
       setStatus("disconnected");
 
       if (event.code === 4001) {
@@ -2013,6 +2045,7 @@ Requirements:
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -2048,14 +2081,14 @@ def calculate_executable_size(
     Calculate the maximum trade size that maintains the arbitrage.
 
     If overpriced (UP_mid + DOWN_mid > 1): sell both tokens.
-      - Executable size = min(total UP bid depth, total DOWN bid depth)
+      - Executable size = min(UP bid depth, DOWN bid depth)
     If underpriced (UP_mid + DOWN_mid < 1): buy both tokens.
-      - Executable size = min(total UP ask depth, total DOWN ask depth)
+      - Executable size = min(UP ask depth, DOWN ask depth)
     """
     if direction == "overpriced":
-        return min(up_book["totalBidDepth"], down_book["totalBidDepth"])
+        return min(up_book["bidDepth"], down_book["bidDepth"])
     else:
-        return min(up_book["totalAskDepth"], down_book["totalAskDepth"])
+        return min(up_book["askDepth"], down_book["askDepth"])
 
 
 def check_arbitrage(
@@ -2071,7 +2104,7 @@ def check_arbitrage(
         # Get all active markets
         resp = client.get("/v1/markets/live")
         resp.raise_for_status()
-        markets = resp.json()["markets"]
+        markets = resp.json()
 
         for market in markets:
             cid = market["conditionId"]
@@ -2082,8 +2115,10 @@ def check_arbitrage(
             except httpx.HTTPStatusError:
                 continue
 
-            up = data["market"]["tokens"]["UP"]
-            down = data["market"]["tokens"]["DOWN"]
+            up = data["up"]
+            down = data["down"]
+            if not up or not down:
+                continue
 
             up_mid = up["midPrice"]
             down_mid = down["midPrice"]
@@ -2115,12 +2150,12 @@ def check_arbitrage(
                 deviation=deviation,
                 deviation_pct=deviation_pct,
                 direction=direction,
-                up_bid_depth=up["totalBidDepth"],
-                up_ask_depth=up["totalAskDepth"],
-                down_bid_depth=down["totalBidDepth"],
-                down_ask_depth=down["totalAskDepth"],
+                up_bid_depth=up["bidDepth"],
+                up_ask_depth=up["askDepth"],
+                down_bid_depth=down["bidDepth"],
+                down_ask_depth=down["askDepth"],
                 executable_size=executable,
-                timestamp=data["market"]["timestamp"],
+                timestamp=datetime.fromtimestamp(max(up["timestamp"], down["timestamp"]) / 1000, timezone.utc).isoformat(),
             ))
 
     # Sort by deviation descending (best opportunities first)

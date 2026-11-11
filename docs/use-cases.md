@@ -8,11 +8,12 @@ Real-world applications built on the Resolved Markets API. Each section includes
 
 Backtest market-making strategies by replaying historical orderbook snapshots. The API captures up to 10 snapshots a second for each orderbook (one every 100 ms) on crypto up/down markets. Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook. This gives you the granularity needed to simulate realistic order placement, fill probability estimation, and inventory risk tracking without risking capital on a live market.
 
-**Approach:** Fetch paginated historical snapshots for a given market and time range using `GET /v1/markets/:id/snapshots`. Iterate through them chronologically, simulating passive limit orders at each step. For each snapshot, check whether your resting orders would have been filled based on the best bid/ask crossing your price. Track PnL, inventory exposure, and fill rates over time.
+**Approach:** Fetch paginated historical snapshots for a given market and time range using `GET /v1/markets/:id/snapshots` with `order=asc`. The rows are in `data` and use snake_case keys. Iterate through them chronologically, simulating passive limit orders at each step. For each snapshot, check whether your resting orders would have been filled based on the best bid/ask crossing your price. Track PnL, inventory exposure, and fill rates over time.
 
 ```python
 import requests
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 API_URL = "https://api.resolvedmarkets.com"
 API_KEY = "rm_your_key"
@@ -38,23 +39,23 @@ class MarketMakerSim:
 
     def check_fills(self, my_bid: float, my_ask: float, snapshot: dict):
         """Check if the market would have filled our orders."""
-        best_ask = snapshot["bestAsk"]
-        best_bid = snapshot["bestBid"]
+        best_ask = snapshot["best_ask"]
+        best_bid = snapshot["best_bid"]
 
         # Our bid gets filled if market's best ask drops to our bid
         if best_ask <= my_bid:
             self.inventory += self.order_size
             self.pnl -= my_bid * self.order_size
-            self.fills.append(("BUY", my_bid, snapshot["eventTimestamp"]))
+            self.fills.append(("BUY", my_bid, snapshot["timestamp"]))
 
         # Our ask gets filled if market's best bid rises to our ask
         if best_bid >= my_ask:
             self.inventory -= self.order_size
             self.pnl += my_ask * self.order_size
-            self.fills.append(("SELL", my_ask, snapshot["eventTimestamp"]))
+            self.fills.append(("SELL", my_ask, snapshot["timestamp"]))
 
 
-def fetch_snapshots(market_id: str, from_ts: str, to_ts: str, token_side: str = "UP"):
+def fetch_snapshots(market_id: str, from_ts: str, to_ts: str, side: str = "UP"):
     """Paginate through all snapshots in the time range."""
     offset = 0
     limit = 1000
@@ -64,12 +65,13 @@ def fetch_snapshots(market_id: str, from_ts: str, to_ts: str, token_side: str = 
             headers=HEADERS,
             params={
                 "from": from_ts, "to": to_ts,
-                "tokenSide": token_side,
+                "side": side, "order": "asc",
                 "limit": limit, "offset": offset,
             },
         )
+        resp.raise_for_status()
         data = resp.json()
-        snapshots = data["snapshots"]
+        snapshots = data["data"]
         if not snapshots:
             break
         yield from snapshots
@@ -82,7 +84,7 @@ def run_backtest(market_id: str, from_ts: str, to_ts: str):
     sim = MarketMakerSim(spread_target=0.02)
 
     for snap in fetch_snapshots(market_id, from_ts, to_ts):
-        mid = snap["midPrice"]
+        mid = snap["mid_price"]
         my_bid, my_ask = sim.quote(mid)
         sim.check_fills(my_bid, my_ask, snap)
 
@@ -93,7 +95,12 @@ def run_backtest(market_id: str, from_ts: str, to_ts: str):
 
 
 # Example: backtest on a BTC market over 1 hour
-run_backtest("0x1234abcd...", "2026-03-24T10:00:00Z", "2026-03-24T11:00:00Z")
+now = datetime.now(timezone.utc)
+run_backtest(
+    "0x1234abcd...",
+    (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+)
 ```
 
 ---
@@ -121,8 +128,8 @@ function sideStats(side) {
     bestAsk: side.bestAsk,
     spread: side.spread,
     midPrice: side.midPrice,
-    totalBidDepth: side.bids.reduce((sum, l) => sum + l.size, 0),
-    totalAskDepth: side.asks.reduce((sum, l) => sum + l.size, 0),
+    bidDepth: side.bidDepth,
+    askDepth: side.askDepth,
     updatedAt: side.timestamp,
   };
 }
@@ -176,7 +183,7 @@ function useOrderbookStream(apiKey) {
 function LiquidityCard({ label, data }) {
   if (!data) return <div className="card loading">{label}: waiting...</div>;
 
-  const imbalance = data.totalBidDepth / (data.totalBidDepth + data.totalAskDepth);
+  const imbalance = data.bidDepth / (data.bidDepth + data.askDepth);
   const imbalancePct = (imbalance * 100).toFixed(1);
   const isSkewed = imbalance > 0.65 || imbalance < 0.35;
 
@@ -194,9 +201,9 @@ function LiquidityCard({ label, data }) {
         <div className="ask-bar" style={{ width: `${100 - imbalancePct}%` }} />
       </div>
       <div className="metric">
-        <span>Bid depth:</span> {data.totalBidDepth.toLocaleString()}
+        <span>Bid depth:</span> {data.bidDepth.toLocaleString()}
         {" | "}
-        <span>Ask depth:</span> {data.totalAskDepth.toLocaleString()}
+        <span>Ask depth:</span> {data.askDepth.toLocaleString()}
       </div>
       {isSkewed && <div className="warning">Liquidity imbalance: {imbalancePct}% bid-heavy</div>}
     </div>
@@ -228,7 +235,7 @@ export default function LiquidityDashboard() {
 
 On Polymarket, every market has an UP token and a DOWN token whose prices should sum to approximately 1.00. When the sum deviates significantly (e.g., > 1.02 or < 0.98), there is a potential arbitrage opportunity: buy the underpriced side, or sell both when the sum exceeds 1.00. This use case monitors that spread.
 
-**Approach:** Poll `GET /v1/markets/live` to get all active markets with their current token prices. For each market, compute `UP.price + DOWN.price` and flag deviations. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
+**Approach:** Poll `GET /v1/markets/live` to list the live markets. It returns an array of markets with no prices, so read the orderbook of each market with `GET /v1/markets/:id/orderbook`, compute `up.midPrice + down.midPrice` and flag deviations. Each orderbook request costs 1 credit and counts against your requests per minute, so filter the list (here by `category`) and poll no more often than your plan allows. To check every 2 seconds, use the WebSocket stream: each `orderbook` message holds both token books of each market of one coin.
 
 ```python
 import requests
@@ -249,69 +256,62 @@ def fetch_live_markets(category: str | None = None) -> list[dict]:
         params["category"] = category
     resp = requests.get(f"{API_URL}/v1/markets/live", headers=HEADERS, params=params)
     resp.raise_for_status()
-    return resp.json()["markets"]
+    return resp.json()
+
+
+def fetch_orderbook(condition_id: str) -> dict | None:
+    resp = requests.get(
+        f"{API_URL}/v1/markets/{condition_id}/orderbook",
+        headers=HEADERS,
+    )
+    if not resp.ok:
+        return None
+    return resp.json()
 
 
 def check_arbitrage(markets: list[dict]) -> list[dict]:
     opportunities = []
 
     for market in markets:
-        tokens = market["tokens"]
-        up_token = next((t for t in tokens if t["side"] == "UP"), None)
-        down_token = next((t for t in tokens if t["side"] == "DOWN"), None)
-
-        if not up_token or not down_token:
+        book = fetch_orderbook(market["conditionId"])
+        if not book or not book["up"] or not book["down"]:
             continue
+        up, down = book["up"], book["down"]
 
-        price_sum = up_token["price"] + down_token["price"]
+        price_sum = up["midPrice"] + down["midPrice"]
         deviation = abs(price_sum - 1.0)
 
         if deviation > DEVIATION_THRESHOLD:
             opportunities.append({
                 "market": market["question"],
                 "conditionId": market["conditionId"],
-                "up_price": up_token["price"],
-                "down_price": down_token["price"],
+                "up_price": up["midPrice"],
+                "down_price": down["midPrice"],
                 "sum": round(price_sum, 4),
                 "deviation": round(deviation, 4),
                 "direction": "overpriced" if price_sum > 1.0 else "underpriced",
+                "up_bid_depth": up["bidDepth"],
+                "down_bid_depth": down["bidDepth"],
             })
 
     return sorted(opportunities, key=lambda x: x["deviation"], reverse=True)
 
 
-def get_depth_context(condition_id: str) -> dict:
-    """Fetch orderbook to verify there is enough liquidity to act on."""
-    resp = requests.get(
-        f"{API_URL}/v1/markets/{condition_id}/orderbook",
-        headers=HEADERS,
-    )
-    resp.raise_for_status()
-    book = resp.json()["market"]["tokens"]
-    return {
-        "up_bid_depth": book["UP"]["totalBidDepth"],
-        "down_bid_depth": book["DOWN"]["totalBidDepth"],
-        "up_ask_depth": book["UP"]["totalAskDepth"],
-        "down_ask_depth": book["DOWN"]["totalAskDepth"],
-    }
-
-
-def monitor(interval_sec: int = 10):
+def monitor(interval_sec: int = 60, category: str = "crypto"):
     """Continuously monitor for arbitrage opportunities."""
     print(f"Monitoring for UP+DOWN deviations > {DEVIATION_THRESHOLD}...")
 
     while True:
-        markets = fetch_live_markets()
+        markets = fetch_live_markets(category)
         opps = check_arbitrage(markets)
 
         if opps:
             print(f"\n[{datetime.now().isoformat()}] Found {len(opps)} opportunities:")
             for opp in opps:
-                depth = get_depth_context(opp["conditionId"])
                 print(f"  {opp['market']}")
                 print(f"    UP={opp['up_price']} + DOWN={opp['down_price']} = {opp['sum']}")
                 print(f"    Deviation: {opp['deviation']} ({opp['direction']})")
-                print(f"    Liquidity: bid_depth UP={depth['up_bid_depth']:.0f} DOWN={depth['down_bid_depth']:.0f}")
+                print(f"    Liquidity: bid_depth UP={opp['up_bid_depth']:.0f} DOWN={opp['down_bid_depth']:.0f}")
         else:
             print(".", end="", flush=True)
 
@@ -389,12 +389,12 @@ The MCP server handles authentication, rate limiting, and data formatting -- the
 
 Bulk export historical orderbook data for academic research on prediction markets. Study spread dynamics, market microstructure, price discovery efficiency, and how prediction market prices converge to outcomes as expiration approaches. Snapshots are event-driven. Crypto up/down markets get up to 10 snapshots a second for each orderbook (one every 100 ms). Other categories get at most one snapshot every 500 ms to 5 seconds for each orderbook.
 
-**Approach:** Use the paginated `GET /v1/markets/:id/snapshots` endpoint to download all snapshots for a market over a given period. Load them into a pandas DataFrame for analysis. Export to Parquet or CSV for use in R, Stata, or other research tools.
+**Approach:** Use the paginated `GET /v1/markets/:id/snapshots` endpoint with `order=asc` to download all snapshots for a market over a given period. `includebook=true` adds the `bids` and `asks` levels to each row (then `limit` can be at most 2000). Load them into a pandas DataFrame for analysis. Export to Parquet or CSV for use in R, Stata, or other research tools.
 
 ```python
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 API_URL = "https://api.resolvedmarkets.com"
 API_KEY = "rm_your_key"
@@ -405,7 +405,7 @@ def export_snapshots(
     market_id: str,
     from_ts: str,
     to_ts: str,
-    token_side: str = "UP",
+    side: str = "UP",
 ) -> pd.DataFrame:
     """Download all snapshots for a market and return as a DataFrame."""
     all_snapshots = []
@@ -419,14 +419,16 @@ def export_snapshots(
             params={
                 "from": from_ts,
                 "to": to_ts,
-                "tokenSide": token_side,
+                "side": side,
+                "order": "asc",
+                "includebook": "true",
                 "limit": limit,
                 "offset": offset,
             },
         )
         resp.raise_for_status()
         data = resp.json()
-        snapshots = data["snapshots"]
+        snapshots = data["data"]
 
         if not snapshots:
             break
@@ -445,16 +447,16 @@ def export_snapshots(
     rows = []
     for snap in all_snapshots:
         rows.append({
-            "event_timestamp": snap["eventTimestamp"],
-            "capture_timestamp": snap["captureTimestamp"],
-            "token_side": snap["tokenSide"],
-            "best_bid": snap["bestBid"],
-            "best_ask": snap["bestAsk"],
-            "mid_price": snap["midPrice"],
+            "event_timestamp": snap["event_timestamp"],
+            "capture_timestamp": snap["capture_timestamp"],
+            "token_side": snap["token_side"],
+            "best_bid": snap["best_bid"],
+            "best_ask": snap["best_ask"],
+            "mid_price": snap["mid_price"],
             "spread": snap["spread"],
-            "total_bid_depth": snap["totalBidDepth"],
-            "total_ask_depth": snap["totalAskDepth"],
-            "sequence_number": snap["sequenceNumber"],
+            "bid_depth_total": snap["bid_depth_total"],
+            "ask_depth_total": snap["ask_depth_total"],
+            "sequence_number": snap["sequence_number"],
             "bid_levels": len(snap["bids"]),
             "ask_levels": len(snap["asks"]),
             # Top-of-book detail
@@ -498,18 +500,23 @@ def analyze_spread_dynamics(df: pd.DataFrame):
 
 # Example: export 24 hours of BTC UP token snapshots
 market_id = "0x1234abcd..."
-df = export_snapshots(market_id, "2026-03-23T00:00:00Z", "2026-03-24T00:00:00Z")
+now = datetime.now(timezone.utc)
+df = export_snapshots(
+    market_id,
+    (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+)
 
 if not df.empty:
     analyze_spread_dynamics(df)
 
     # Export for use in other tools
-    df.to_parquet("btc_up_snapshots_20260323.parquet", index=False)
+    df.to_parquet("btc_up_snapshots_24h.parquet", index=False)
     print(f"\nExported {len(df):,} rows to Parquet")
 
     # Also export a sampled version (1 snapshot per second) for lighter analysis
     df_sampled = df.set_index("event_timestamp").resample("1s").first().dropna().reset_index()
-    df_sampled.to_csv("btc_up_snapshots_1s_20260323.csv", index=False)
+    df_sampled.to_csv("btc_up_snapshots_1s_24h.csv", index=False)
     print(f"Exported {len(df_sampled):,} sampled rows to CSV")
 ```
 
@@ -535,7 +542,7 @@ def fetch_all_summaries() -> list[dict]:
     """Fetch live markets and their summaries."""
     resp = requests.get(f"{API_URL}/v1/markets/live", headers=HEADERS)
     resp.raise_for_status()
-    markets = resp.json()["markets"]
+    markets = resp.json()
 
     results = []
     for market in markets:
@@ -546,7 +553,9 @@ def fetch_all_summaries() -> list[dict]:
                 headers=HEADERS,
             )
             summary_resp.raise_for_status()
-            summary = summary_resp.json()["summary"]
+            summary = summary_resp.json()
+            if not summary["snapshot_count"]:
+                continue
             summary["category"] = market["category"]
             summary["question"] = market["question"]
             results.append(summary)
@@ -568,9 +577,9 @@ def analyze_by_category(summaries: list[dict]):
 
     rankings = []
     for cat, markets in sorted(by_cat.items()):
-        spreads = [m["avgSpread"] for m in markets]
-        depths = [m["avgBidDepth"] + m["avgAskDepth"] for m in markets]
-        snap_counts = [m["snapshotCount"] for m in markets]
+        spreads = [m["avg_spread"] for m in markets]
+        depths = [m["avg_bid_depth"] + m["avg_ask_depth"] for m in markets]
+        snap_counts = [m["snapshot_count"] for m in markets]
 
         avg_spread = mean(spreads)
         med_spread = median(spreads)
@@ -602,24 +611,24 @@ def analyze_by_category(summaries: list[dict]):
 
 def find_outlier_markets(summaries: list[dict]):
     """Find markets with unusually wide or tight spreads."""
-    spreads = [s["avgSpread"] for s in summaries]
+    spreads = [s["avg_spread"] for s in summaries]
     global_mean = mean(spreads)
 
     print("\n=== Outlier Markets ===")
     print(f"Global average spread: {global_mean:.4f}\n")
 
-    wide = [s for s in summaries if s["avgSpread"] > global_mean * 2]
-    tight = [s for s in summaries if s["avgSpread"] < global_mean * 0.5]
+    wide = [s for s in summaries if s["avg_spread"] > global_mean * 2]
+    tight = [s for s in summaries if s["avg_spread"] < global_mean * 0.5]
 
     if wide:
         print("Unusually WIDE spreads (>2x average):")
-        for s in sorted(wide, key=lambda x: x["avgSpread"], reverse=True):
-            print(f"  {s['avgSpread']:.4f} - [{s['category']}] {s['question']}")
+        for s in sorted(wide, key=lambda x: x["avg_spread"], reverse=True):
+            print(f"  {s['avg_spread']:.4f} - [{s['category']}] {s['question']}")
 
     if tight:
         print("\nUnusually TIGHT spreads (<0.5x average):")
-        for s in sorted(tight, key=lambda x: x["avgSpread"]):
-            print(f"  {s['avgSpread']:.4f} - [{s['category']}] {s['question']}")
+        for s in sorted(tight, key=lambda x: x["avg_spread"]):
+            print(f"  {s['avg_spread']:.4f} - [{s['category']}] {s['question']}")
 
 
 summaries = fetch_all_summaries()
@@ -633,12 +642,12 @@ find_outlier_markets(summaries)
 
 Compare weather prediction market prices with actual weather data to study prediction accuracy. Polymarket hosts weather markets (e.g., "Will NYC temperature exceed 90F this week?"), and this use case tracks how the market-implied probability evolves relative to observed and forecast conditions. Useful for evaluating whether prediction markets are well-calibrated for weather events.
 
-**Approach:** Fetch weather-category markets via `GET /v1/markets/live?category=weather`, then use `GET /v1/markets/:id/snapshots` to track how the UP token mid-price (the implied probability of "Yes") changes over time. Pair this with an external weather API (e.g., Open-Meteo, free and no API key required) to overlay actual observations. Compute a calibration curve: when the market says 70% probability, does the event happen ~70% of the time?
+**Approach:** Fetch weather-category markets via `GET /v1/markets/live?category=weather`, then use `GET /v1/markets/:id/snapshots` to track how the UP token mid-price (the implied probability of "Yes") changes over time. Weather markets need the Scale or Enterprise plan. Pair this with an external weather API (e.g., Open-Meteo, free and no API key required) to overlay actual observations. Compute a calibration curve: when the market says 70% probability, does the event happen ~70% of the time?
 
 ```python
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 API_URL = "https://api.resolvedmarkets.com"
 API_KEY = "rm_your_key"
@@ -656,13 +665,14 @@ def fetch_weather_markets() -> list[dict]:
         params={"category": "weather"},
     )
     resp.raise_for_status()
-    return resp.json()["markets"]
+    return resp.json()
 
 
 def fetch_market_probability_series(market_id: str, hours: int = 48) -> pd.DataFrame:
     """Get the UP token mid-price over time (= implied probability)."""
-    to_ts = datetime.utcnow().isoformat() + "Z"
-    from_ts = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + "Z"
+    now = datetime.now(timezone.utc)
+    to_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    from_ts = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     all_snaps = []
     offset = 0
@@ -672,15 +682,15 @@ def fetch_market_probability_series(market_id: str, hours: int = 48) -> pd.DataF
             headers=HEADERS,
             params={
                 "from": from_ts, "to": to_ts,
-                "tokenSide": "UP",
+                "side": "UP", "order": "asc",
                 "limit": 1000, "offset": offset,
             },
         )
         resp.raise_for_status()
         data = resp.json()
-        if not data["snapshots"]:
+        if not data["data"]:
             break
-        all_snaps.extend(data["snapshots"])
+        all_snaps.extend(data["data"])
         offset += 1000
         if offset >= data["total"]:
             break
@@ -689,9 +699,9 @@ def fetch_market_probability_series(market_id: str, hours: int = 48) -> pd.DataF
     if df.empty:
         return df
 
-    df["timestamp"] = pd.to_datetime(df["eventTimestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
     # Resample to 1-minute intervals for manageable size
-    df = df.set_index("timestamp").resample("1min")["midPrice"].mean().dropna().reset_index()
+    df = df.set_index("timestamp").resample("1min")["mid_price"].mean().dropna().reset_index()
     df.columns = ["timestamp", "implied_probability"]
     return df
 
