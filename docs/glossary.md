@@ -30,7 +30,7 @@ Quick-reference glossary of terms used across the Resolved Markets platform.
 | **credit pack** | Prepaid bundle of API credits for paid tiers ($5/10K, $20/100K, $50/500K). |
 | **x402** | HTTP 402-based micropayment protocol. Clients pay $0.001 per request in USDC on Base — no account or API key needed. Bypasses rate limits and credit deduction. |
 | **market category** | Classification of tracked markets: crypto, equities (SPX), social (Elon tweets), sports (NBA/NFL/EPL), economics (FOMC/NFP), weather (temperatures/hurricanes). |
-| **timeframe** | Duration window for a market. Crypto: 5m, 15m, 1h, 4h, 1d (up/down), hit-price (daily hit-price markets). SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
+| **timeframe** | Duration window for a market. Crypto up/down: 5m, 15m, 1h, 4h, 1d. SPX: 1d. Elon tweets: weekly. Sports: game. Economics: meeting/monthly. |
 | **Clerk Billing** | Integrated payment system for card/Stripe subscriptions. Plans managed in Clerk Dashboard. |
 | **NOWPayments** | Crypto payment gateway for tier upgrades and credit packs. Supports 200+ cryptocurrencies. |
 | **Hyperliquid** | On-chain perpetual futures exchange. Resolved Markets collects L2 orderbook data for BTC, ETH, SOL, XRP, DOGE, HYPE, BNB perps. |
