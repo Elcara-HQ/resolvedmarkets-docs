@@ -22,7 +22,7 @@ Polymarket WS          Binance WS         Hyperliquid WS
      |                      |                    |
      v                      v                    v
 CLOBCollector      CryptoPriceCollector   HyperliquidCollector
-     |                      |              (L2 book deltas)
+     |                      |              (full L2 books)
      v                      |                    |
 OrderbookManager  <---------+                    v
      |                                   1/sec sampled writes
